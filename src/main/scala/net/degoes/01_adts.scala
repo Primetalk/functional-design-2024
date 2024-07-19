@@ -1,6 +1,6 @@
 package net.degoes
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import java.util.Currency
 
 /*
@@ -27,7 +27,7 @@ object credit_card:
     * * Number * Name * Expiration date * Security code
     */
 //  type CreditCard
-  case class CreditCard(number: Int, name: String, expirationDate: Instant, securityCode: String)
+  case class CreditCard(number: String, name: String, expirationDate: LocalDate, securityCode: String)
 
   /** EXERCISE 2
     *
@@ -36,10 +36,18 @@ object credit_card:
     * or access to an event, such as a music concert or film showing.
     */
 //  type Product
-  enum Product(name: String):
-    case PhysicalProduct(name: String) extends Product(name)
-    case DigitalProduct(name: String) extends Product(name)
-    case EventAccess(name: String) extends Product(name)
+  sealed trait Product
+
+  enum PhysicalProduct extends Product:
+    case GallonOfMilk
+
+  enum DigitalProduct extends Product:
+    case Book
+    case Movie
+
+  enum EventAccess extends Product:
+    case MusicConcert
+    case FilmShowing
 
   /** EXERCISE 3
     *
@@ -48,8 +56,8 @@ object credit_card:
     */
 //  type PricingScheme
   enum PricingScheme:
-    case OneTimeFee(fee: BigDecimal) extends PricingScheme
-    case RecurringFee(fee: BigDecimal, interval: Instant) extends PricingScheme
+    case OneTimeFee(fee: BigDecimal)
+    case RecurringFee(fee: BigDecimal, interval: Instant)
 
 end credit_card
 
@@ -65,15 +73,17 @@ object events:
     * Refactor the object-oriented data model in this section to a more functional one, which uses
     * only enums and case classes.
     */
-  enum UserEvent(id: Int, time: Instant, userName: String):
+
+  sealed trait Event:
+    def id: Int
+
+  enum UserEvent(id: Int, time: Instant, userName: String) extends Event:
     case UserPurchase(id: Int, item: String, price: Double, time: Instant, userName: String) extends UserEvent(id, time, userName)
     case UserAccountCreated(id: Int, userName: String, time: Instant) extends UserEvent(id, time, userName)
 
-  enum DeviceEvent(id: Int, time: Instant, deviceId: Int):
+  enum DeviceEvent(id: Int, time: Instant, deviceId: Int) extends Event:
     case SensorUpdated(id: Int, deviceId: Int, time: Instant, reading: Option[Double]) extends DeviceEvent(id, time, deviceId)
     case DeviceActivated(id: Int, deviceId: Int, time: Instant) extends DeviceEvent(id, time, deviceId)
-
-  type Event = UserEvent | DeviceEvent
 
   // Events are either UserEvent (produced by a user) or DeviceEvent (produced by a device),
   // please don't extend both it will break code!!!
