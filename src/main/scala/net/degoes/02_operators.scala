@@ -1,5 +1,8 @@
 package net.degoes
 
+import java.io.{BufferedInputStream, SequenceInputStream}
+import scala.util.{Failure, Success, Try}
+
 /*
  * INTRODUCTION
  *
@@ -61,7 +64,9 @@ object input_stream:
       * first input stream, and then when that one is exhausted, it will close the first input
       * stream, make the second input stream, and continue reading from the second one.
       */
-    def ++(that: => IStream): IStream = ???
+    def ++(that: => IStream): IStream =
+      val bothStreamsConcatenated = new SequenceInputStream(self.createInputStream(), that.createInputStream())
+      IStream(() => bothStreamsConcatenated)
 
     /** EXERCISE 2
       *
@@ -69,14 +74,22 @@ object input_stream:
       * input stream, but if that fails by throwing an exception, it will then try to create the
       * second input stream.
       */
-    def orElse(that: => IStream): IStream = ???
+    def orElse(that: => IStream): IStream =
+      IStream.suspend:
+        Try(self.createInputStream()) match
+          case Failure(exception) => that
+          case Success(value) => IStream(() => value)
 
     /** EXERCISE 3
       *
       * Create an operator `buffered` that returns a new `IStream`, which will create the input
       * stream, but wrap it in Java's `BufferedInputStream` before returning it.
       */
-    def buffered: IStream = ???
+    def buffered: IStream =
+      val inputStream = self.createInputStream()
+      val bufStream = new BufferedInputStream(inputStream)
+      IStream(() => bufStream)
+
   end IStream
   object IStream:
 
@@ -95,10 +108,12 @@ object input_stream:
     * assemble the data from all the `fragments` by concatenating them into one. Regardless of where
     * the data comes from, everything should be buffered.
     */
-  lazy val allData: IStream = ???
+  lazy val allData: IStream =
+    val collectedFragments = (IStream.empty :: fragments).reduce(_ ++ _)
+    primary.buffered.orElse(collectedFragments)
 
-  lazy val primary: IStream         = ???
-  lazy val fragments: List[IStream] = ???
+  lazy val primary: IStream         = IStream(() => new java.io.ByteArrayInputStream(Array[Byte](1, 2, 3)))
+  lazy val fragments: List[IStream] = List(IStream.empty, IStream.empty)
 end input_stream
 
 /** EMAIL CLIENT - EXERCISE SET 2
@@ -118,21 +133,25 @@ object email_filter:
       * Add an "and" operator that will match an email if both the first and the second email filter
       * match the email.
       */
-    def &&(that: EmailFilter): EmailFilter = ???
+    def &&(that: EmailFilter): EmailFilter =
+      EmailFilter(email => self.matches(email) && that.matches(email))
 
     /** EXERCISE 2
       *
       * Add an "or" operator that will match an email if either the first or the second email filter
       * match the email.
       */
-    def ||(that: EmailFilter): EmailFilter = ???
+    def ||(that: EmailFilter): EmailFilter =
+      EmailFilter(email => self.matches(email) || that.matches(email))
 
     /** EXERCISE 3
       *
       * Add a "negate" operator that will match an email if this email filter does NOT match an
       * email.
       */
-    def unary_! : EmailFilter = ???
+    def unary_! : EmailFilter =
+      EmailFilter(email => !self.matches(email))
+
   end EmailFilter
   object EmailFilter:
     def senderIs(address: Address): EmailFilter = EmailFilter(_.sender == address)
@@ -149,7 +168,11 @@ object email_filter:
     * contain the word "N95", and which are NOT addressed to "john@doe.com". Build this filter up
     * compositionally by using the defined constructors and operators.
     */
-  lazy val emailFilter1 = ???
+  lazy val emailFilter1 =
+    EmailFilter.subjectContains("discount") &&
+      EmailFilter.bodyContains("N95") &&
+      !EmailFilter.recipientIs(Address("john@doe.com"))
+
 end email_filter
 
 /** DATA TRANSFORM - EXERCISE SET 3
