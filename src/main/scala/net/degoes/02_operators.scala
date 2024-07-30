@@ -406,7 +406,11 @@ object ui_events:
       * Add a method `+` that composes two listeners into a single listener, by sending each game
       * event to both listeners.
       */
-    def +(that: Listener): Listener = ???
+    def +(that: Listener): Listener =
+      Listener { event =>
+        self.onEvent(event)
+        that.onEvent(event)
+      }
 
     /** EXERCISE 2
       *
@@ -414,21 +418,36 @@ object ui_events:
       * game event to either the left listener, if it does not throw an exception, or the right
       * listener, if the left throws an exception.
       */
-    def orElse(that: Listener): Listener = ???
+    def orElse(that: Listener): Listener =
+      Listener { event =>
+        try
+          self.onEvent(event)
+        catch
+          case _: Throwable => that.onEvent(event)
+      }
 
     /** EXERCISE 3
       *
       * Add a `runOn` operator that returns a Listener that will call this one's `onEvent` callback
       * on the specified `ExecutionContext`.
       */
-    def runOn(ec: scala.concurrent.ExecutionContext): Listener = ???
+    def runOn(ec: ExecutionContext): Listener =
+      Listener { event =>
+        ec.execute(new Runnable {
+          def run(): Unit = onEvent(event)
+        })
+      }
 
     /** EXERCISE 4
       *
       * Add a `debug` unary operator that will call the `onEvent` callback, but before it does, it
       * will print out the game event to the console.
       */
-    def debug: Listener = ???
+    def debug: Listener =
+      Listener { event =>
+        println(s"Event received: $event")
+        onEvent(event)
+      }
   end Listener
 
   /** EXERCISE 5
@@ -437,13 +456,32 @@ object ui_events:
     * game event, making the gfxUpdateListener run on the `uiExecutionContext`, and debugging the
     * input events.
     */
-  lazy val solution = ???
+  // Implementing listeners
+  lazy val twinkleAnimationListener: Listener = Listener { event =>
+    println(s"Twinkle Animation for event: $event")
+  }
 
-  lazy val twinkleAnimationListener: Listener = ???
-  lazy val motionDetectionListener: Listener  = ???
-  lazy val gfxUpdateListener: Listener        = ???
+  lazy val motionDetectionListener: Listener = Listener { event =>
+    println(s"Motion detected for event: $event")
+  }
 
-  lazy val uiExecutionContext: scala.concurrent.ExecutionContext = ???
+  lazy val gfxUpdateListener: Listener = Listener { event =>
+    println(s"Graphics updated for event: $event")
+  }
+
+  lazy val uiExecutionContext: ExecutionContext = ExecutionContext.global
+
+  lazy val solution: Listener = {
+    val debugListener = Listener { event =>
+      println(s"Debugging event: $event")
+    }
+
+  val gfxListenerOnUI = Listener { event =>
+    Future(gfxUpdateListener.onEvent(event))(uiExecutionContext)
+  }
+
+  debugListener + twinkleAnimationListener + motionDetectionListener + gfxListenerOnUI
+}
 end ui_events
 
 /** EDUCATION - GRADUATION PROJECT
