@@ -65,7 +65,7 @@ object input_stream:
       * stream, make the second input stream, and continue reading from the second one.
       */
     def ++(that: => IStream): IStream =
-      val bothStreamsConcatenated = new SequenceInputStream(self.createInputStream(), that.createInputStream())
+      lazy val bothStreamsConcatenated = new SequenceInputStream(self.createInputStream(), that.createInputStream())
       IStream(() => bothStreamsConcatenated)
 
     /** EXERCISE 2
@@ -86,8 +86,8 @@ object input_stream:
       * stream, but wrap it in Java's `BufferedInputStream` before returning it.
       */
     def buffered: IStream =
-      val inputStream = self.createInputStream()
-      val bufStream = new BufferedInputStream(inputStream)
+      lazy val inputStream = self.createInputStream()
+      lazy val bufStream = new BufferedInputStream(inputStream)
       IStream(() => bufStream)
 
   end IStream
@@ -491,7 +491,13 @@ object education:
       *
       * Add a `+` operator that combines this quiz result with the specified quiz result.
       */
-    def +(that: QuizResult): QuizResult = ???
+    def +(that: QuizResult): QuizResult =
+      QuizResult(
+        self.correctPoints + that.correctPoints,
+        self.bonusPoints + that.bonusPoints,
+        self.wrongPoints + that.wrongPoints,
+        self.wrong ++ that.wrong
+      )
   object QuizResult:
 
     /** An `empty` QuizResult that, when combined with any quiz result, returns that same quiz
@@ -506,13 +512,17 @@ object education:
       *
       * Add an operator `+` that appends this quiz to the specified quiz.
       */
-    def +(that: Quiz): Quiz = ???
+    def +(that: Quiz): Quiz =
+      Quiz(
+        () => self.run() + that.run()
+      )
 
     /** EXERCISE 3
       *
       * Add a unary operator `bonus` that marks this quiz as a bonus quiz.
       */
-    def bonus: Quiz = ???
+    def bonus: Quiz =
+      Quiz(() => self.run().toBonus)
 
     /** EXERCISE 4
       *
@@ -520,7 +530,10 @@ object education:
       * quiz, and if it returns true, will execute the `ifPass` quiz afterward; but otherwise, will
       * execute the `ifFail` quiz.
       */
-    def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz = ???
+    def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz =
+      if f(self.run()) then ifPass
+      else ifFail
+
   end Quiz
   object Quiz:
     private def grade[A](f: String => A, checker: Checker[A]): QuizResult =
@@ -583,4 +596,15 @@ object education:
     */
   lazy val exampleQuiz: Quiz =
     Quiz(Question.TrueFalse("Is coffee the best hot beverage on planet earth?", Checker.isTrue(10)))
+  lazy val toughBonusQuestion: Quiz =
+    Quiz(Question.Text("What's the capital of Great Britain?", Checker.isText(30)("London")))
+  lazy val simpleBonusQuestion: Quiz =
+    Quiz(
+      Question.MultipleChoice(
+        "How many grams in kilogram?",
+        Vector("50", "250", "1000"),
+        Checker.isMultipleChoice(15)(3)
+      )
+    )
+  lazy val entireQuiz: Quiz = exampleQuiz + toughBonusQuestion + simpleBonusQuestion
 end education
