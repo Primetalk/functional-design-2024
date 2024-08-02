@@ -110,7 +110,7 @@ object input_stream:
     */
   lazy val allData: IStream =
     val collectedFragments = (IStream.empty :: fragments).reduce(_ ++ _)
-    primary.buffered.orElse(collectedFragments)
+    primary.orElse(collectedFragments).buffered
 
   lazy val primary: IStream         = IStream(() => new java.io.ByteArrayInputStream(Array[Byte](1, 2, 3)))
   lazy val fragments: List[IStream] = List(IStream.empty, IStream.empty)
@@ -128,13 +128,18 @@ object email_filter:
   final case class EmailFilter(matches: Email => Boolean):
     self =>
 
+    def lift2(f: (Boolean, Boolean) => Boolean, that: EmailFilter): EmailFilter =
+      EmailFilter(email => f(self.matches(email), that.matches(email)))
+
     /** EXERCISE 1
       *
       * Add an "and" operator that will match an email if both the first and the second email filter
       * match the email.
       */
     def &&(that: EmailFilter): EmailFilter =
-      EmailFilter(email => self.matches(email) && that.matches(email))
+//      EmailFilter(email => self.matches(email) && that.matches(email))
+      // another option:
+      lift2(_ && _, that)
 
     /** EXERCISE 2
       *
@@ -142,7 +147,9 @@ object email_filter:
       * match the email.
       */
     def ||(that: EmailFilter): EmailFilter =
-      EmailFilter(email => self.matches(email) || that.matches(email))
+//      EmailFilter(email => self.matches(email) || that.matches(email))
+      // another option:
+      lift2(_ || _, that)
 
     /** EXERCISE 3
       *
