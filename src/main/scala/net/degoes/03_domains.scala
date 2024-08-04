@@ -1,5 +1,7 @@
 package net.degoes
 
+import java.time.LocalDateTime
+
 /*
  * INTRODUCTION
  *
@@ -55,7 +57,7 @@ object spreadsheet:
     * Design a data type called `CalculatedValue`, which represents a `Value` that is dynamically
     * computed from a `Spreadsheet`.
     */
-  final case class CalculatedValue( /* ??? */ ):
+  final case class CalculatedValue(calc: Spreadsheet => Value ):
     self =>
 
     /** EXERCISE 2
@@ -63,25 +65,46 @@ object spreadsheet:
       * Add an operator that returns a new `CalculatedValue` that is the negated version of this
       * one.
       */
-    def unary_- : CalculatedValue = ???
+    def unary_- : CalculatedValue =
+      lazy val negation = (ss: Spreadsheet) => self.calc(ss) match
+        case Value.Dbl(value) => Value.Dbl(-value)
+        case Value.Str(value) => Value.Str(value)
+        case Value.Error(message) => Value.Error(message)
+
+      CalculatedValue(negation)
 
     /** EXERCISE 3
       *
       * Add a binary operator `+` that returns a new `CalculatedValue` that is the sum of the two
       * calculated values.
       */
-    def +(that: CalculatedValue): CalculatedValue = ???
+    def +(that: CalculatedValue): CalculatedValue =
+      lazy val addition = (ss: Spreadsheet) => (self.calc(ss), that.calc(ss)) match
+        case (Value.Dbl(double1), Value.Dbl(double2))   => Value.Dbl(double1 + double2)
+        case (Value.Str(string1), Value.Str(string2))   => Value.Str(string1 + string2)
+        case (Value.Error(error1), Value.Error(error2)) => Value.Error(error1 + ";\n" + error2)
+        case _ => Value.Error("Non-additional types")
+
+      CalculatedValue(addition)
 
     /** EXERCISE 4
       *
       * Add a binary operator `-` that returns a new `CalculatedValue` that is the difference of the
       * two calculated values.
       */
-    def -(that: CalculatedValue): CalculatedValue = ???
+    def -(that: CalculatedValue): CalculatedValue =
+      lazy val subtraction = (ss: Spreadsheet) => (self.calc(ss), that.calc(ss)) match
+        case (Value.Dbl(double1), Value.Dbl(double2)) => Value.Dbl(double1 - double2)
+        case _ => Value.Error("Non-subtractive types")
+
+      CalculatedValue(subtraction)
 
     protected def binaryOp(that: CalculatedValue)(error: String)(
       f: PartialFunction[(Value, Value), Value]
-    ): CalculatedValue = ???
+    ): CalculatedValue =
+      lazy val fMapping = (ss: Spreadsheet) => f.applyOrElse((self.calc(ss), that.calc(ss)), _ => Value.Error(error))
+      CalculatedValue(fMapping)
+
   end CalculatedValue
   object CalculatedValue:
 
@@ -89,20 +112,25 @@ object spreadsheet:
       *
       * Add a constructor that makes an `CalculatedValue` from a `Value`.
       */
-    def const(contents: Value): CalculatedValue = ???
+    def const(contents: Value): CalculatedValue =
+      CalculatedValue(_ => contents)
 
     /** EXERCISE 6
       *
       * Add a constructor that provides access to the value of the specified cell, identified by
       * col/row.
       */
-    def at(col: Int, row: Int): CalculatedValue = ???
+    def at(col: Int, row: Int): CalculatedValue =
+//      lazy val getValue = (ss: Spreadsheet) => ss.valueAt(col, row)
+      ???
 
   /** EXERCISE 7
     *
     * Describe a cell whose contents are the sum of the cells at (0, 0) and (1, 0).
     */
-  lazy val cell1: Cell = ???
+  lazy val cell1: Cell =
+    Cell(2, 0, CalculatedValue.at(0, 0) + CalculatedValue.at(1, 0))
+
 end spreadsheet
 
 /** ETL - EXERCISE SET 2
@@ -167,7 +195,13 @@ object etl:
     * Also mock out, but do not implement, a method on each repository type called `load`, which
     * returns a `DataStream`.
     */
-  type DataRepo
+  enum DataRepo(urls: List[String]):
+    def load: DataStream = ???
+
+    case FTP(urls: List[String]) extends DataRepo(urls)
+    case URL(urls: List[String]) extends DataRepo(urls)
+    case S3(urls: List[String], bucketNames: List[String]) extends DataRepo(urls)
+    case JDBC(urls: List[String]) extends DataRepo(urls)
 
   enum FileFormat:
     case Json
@@ -181,6 +215,9 @@ object etl:
     */
   enum DataType:
     case Null
+    case STRING
+    case NUMERIC
+    case DATETIME
 
   /** EXERCISE 3
     *
@@ -192,18 +229,45 @@ object etl:
     */
   enum DataValue:
     case Null
+    case STRING(value: String)
+    case INTEGER(value: Int)
+    case DATETIME(value: LocalDateTime)
 
     def self = this
 
     def dataType: DataType =
       self match
         case Null => DataType.Null
+        case STRING(_) => DataType.NUMERIC
+        case INTEGER(_) => DataType.NUMERIC
+        case DATETIME(_) => DataType.DATETIME
+
 
     def coerce(otherType: DataType): Option[DataValue] =
       self match
         case Null =>
           otherType match
             case DataType.Null => Some(Null)
+            case _ => None
+        case STRING(value) =>
+          otherType match
+            case DataType.Null => Some(Null)
+            case DataType.STRING => Some(self)
+            case DataType.NUMERIC => Try(INTEGER(value.toInt)).toOption
+            case DataType.DATETIME => Try(DATETIME(LocalDateTime.parse(value))).toOption
+        case INTEGER(value) =>
+          otherType match
+            case DataType.Null => Some(Null)
+            case DataType.STRING => Some(STRING(value.toString))
+            case DataType.NUMERIC => Some(self)
+            case DataType.DATETIME => None
+        case DATETIME(value) =>
+          otherType match
+            case DataType.Null => Some(Null)
+            case DataType.STRING => Some(STRING(value.toString))
+            case DataType.NUMERIC => None
+            case DataType.DATETIME => Some(self)
+
   end DataValue
 
   /** EXERCISE 4
@@ -213,7 +277,7 @@ object etl:
     *
     * Create a model of a pipeline, using `DataStream`.
     */
-  final case class Pipeline( /* ??? */ ):
+  final case class Pipeline( dataStreamCb: () => DataStream ):
     self =>
 
     /** EXERCISE 5
@@ -228,38 +292,53 @@ object etl:
       * Merge Duplication:    ???
       * }}}
       */
-    def merge(that: Pipeline): Pipeline = ???
+    def merge(that: Pipeline): Pipeline =
+      Pipeline(() => self.dataStreamCb() merge that.dataStreamCb())
 
     /** EXERCISE 6
       *
       * Add an `orElse` operator that models applying this pipeline, but if it fails, switching over
       * and trying another pipeline.
       */
-    def orElse(that: Pipeline): Pipeline = ???
+    def orElse(that: Pipeline): Pipeline =
+      // wrapped in Pipeline{} for laziness
+      Pipeline { () =>
+        Try(self.dataStreamCb()) match
+          case Failure(_) => that.dataStreamCb()
+          case Success(value) => value
+      }
 
     /** EXERCISE 7
       *
       * Add an operator to rename a column in a pipeline.
       */
-    def rename(oldName: String, newName: String): Pipeline = ???
+    def rename(oldName: String, newName: String): Pipeline =
+      Pipeline(() => self.dataStreamCb().rename(oldName, newName))
 
     /** EXERCISE 8
       *
       * Add an operator to coerce a column into a specific type in a pipeline.
       */
-    def coerce(column: String, newType: DataType): Pipeline = ???
+    def coerce(column: String, newType: DataType): Pipeline =
+      Pipeline(() => self.dataStreamCb().coerce(column, newType))
 
     /** EXERCISE 9
       *
       * Add an operator to delete a column in a pipeline.
       */
-    def delete(column: String): Pipeline = ???
+    def delete(column: String): Pipeline =
+      Pipeline(() => self.dataStreamCb().delete(column))
 
     /** EXERCISE 10
       *
       * To replace nulls in the specified column with a specified value.
       */
-    def replaceNulls(column: String, defaultValue: DataValue): Pipeline = ???
+    def replaceNulls(column: String, defaultValue: DataValue): Pipeline =
+      Pipeline { () =>
+        self.dataStreamCb().mapColumn(column):
+          case DataValue.Null => defaultValue
+      }
+
   end Pipeline
   object Pipeline:
 
@@ -268,7 +347,7 @@ object etl:
       * Add a constructor for `Pipeline` that models extraction of data from the specified data
       * repository.
       */
-    def extract(repo: DataRepo): Pipeline = ???
+    def extract(repo: DataRepo): Pipeline = Pipeline(() => repo.load)
 
   /** EXERCISE 12
     *
@@ -276,7 +355,12 @@ object etl:
     * "0" as the default age, which renames a column "fname" into a column "first_name", and which
     * coerces the "age" column into an integer type.
     */
-  lazy val pipeline: Pipeline = ???
+  lazy val pipeline: Pipeline =
+    Pipeline.extract(DataRepo.URL(List("https://google.com")))
+      .replaceNulls("age", DataValue.STRING("0"))
+      .rename("fname", "first_name")
+      .coerce("age", DataType.NUMERIC)
+
 end etl
 
 /** REAL ESTATE APP - GRADUATION PROJECT
