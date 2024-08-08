@@ -531,8 +531,10 @@ object education:
       * execute the `ifFail` quiz.
       */
     def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz =
-      if f(self.run()) then ifPass
-      else ifFail
+      Quiz { () =>
+        if f(self.run()) then ifPass.run()
+        else ifFail.run()
+      }
 
   end Quiz
   object Quiz:
@@ -596,8 +598,9 @@ object education:
     */
   lazy val exampleQuiz: Quiz =
     Quiz(Question.TrueFalse("Is coffee the best hot beverage on planet earth?", Checker.isTrue(10)))
+  lazy val easyQuestion: Quiz = Quiz(Question.TrueFalse("Do we live in 21st century?", Checker.isTrue(12)))
   lazy val toughBonusQuestion: Quiz =
-    Quiz(Question.Text("What's the capital of Great Britain?", Checker.isText(30)("London")))
+    Quiz(Question.Text("What's the capital of Great Britain?", Checker.isText(30)("London"))).bonus
   lazy val simpleBonusQuestion: Quiz =
     Quiz(
       Question.MultipleChoice(
@@ -606,5 +609,7 @@ object education:
         Checker.isMultipleChoice(15)(3)
       )
     )
-  lazy val entireQuiz: Quiz = exampleQuiz + toughBonusQuestion + simpleBonusQuestion
+  lazy val entireQuiz: Quiz = 
+    exampleQuiz + 
+      toughBonusQuestion.check(question => question.wrong.nonEmpty)(ifPass = simpleBonusQuestion, ifFail = easyQuestion)
 end education
