@@ -1,5 +1,8 @@
 package net.degoes
 
+import java.io.{BufferedInputStream, SequenceInputStream}
+import scala.util.{Failure, Success, Try}
+
 /*
  * INTRODUCTION
  *
@@ -61,7 +64,9 @@ object input_stream:
       * first input stream, and then when that one is exhausted, it will close the first input
       * stream, make the second input stream, and continue reading from the second one.
       */
-    def ++(that: => IStream): IStream = ???
+    def ++(that: => IStream): IStream =
+      lazy val bothStreamsConcatenated = new SequenceInputStream(self.createInputStream(), that.createInputStream())
+      IStream(() => bothStreamsConcatenated)
 
     /** EXERCISE 2
       *
@@ -69,14 +74,22 @@ object input_stream:
       * input stream, but if that fails by throwing an exception, it will then try to create the
       * second input stream.
       */
-    def orElse(that: => IStream): IStream = ???
+    def orElse(that: => IStream): IStream =
+      IStream.suspend:
+        Try(self.createInputStream()) match
+          case Failure(exception) => that
+          case Success(value) => IStream(() => value)
 
     /** EXERCISE 3
       *
       * Create an operator `buffered` that returns a new `IStream`, which will create the input
       * stream, but wrap it in Java's `BufferedInputStream` before returning it.
       */
-    def buffered: IStream = ???
+    def buffered: IStream =
+      lazy val inputStream = self.createInputStream()
+      lazy val bufStream = new BufferedInputStream(inputStream)
+      IStream(() => bufStream)
+
   end IStream
   object IStream:
 
@@ -95,10 +108,12 @@ object input_stream:
     * assemble the data from all the `fragments` by concatenating them into one. Regardless of where
     * the data comes from, everything should be buffered.
     */
-  lazy val allData: IStream = ???
+  lazy val allData: IStream =
+    val collectedFragments = (IStream.empty :: fragments).reduce(_ ++ _)
+    primary.orElse(collectedFragments).buffered
 
-  lazy val primary: IStream         = ???
-  lazy val fragments: List[IStream] = ???
+  lazy val primary: IStream         = IStream(() => new java.io.ByteArrayInputStream(Array[Byte](1, 2, 3)))
+  lazy val fragments: List[IStream] = List(IStream.empty, IStream.empty)
 end input_stream
 
 /** EMAIL CLIENT - EXERCISE SET 2
@@ -113,26 +128,37 @@ object email_filter:
   final case class EmailFilter(matches: Email => Boolean):
     self =>
 
+    def lift2(f: (Boolean, Boolean) => Boolean, that: EmailFilter): EmailFilter =
+      EmailFilter(email => f(self.matches(email), that.matches(email)))
+
     /** EXERCISE 1
       *
       * Add an "and" operator that will match an email if both the first and the second email filter
       * match the email.
       */
-    def &&(that: EmailFilter): EmailFilter = ???
+    def &&(that: EmailFilter): EmailFilter =
+//      EmailFilter(email => self.matches(email) && that.matches(email))
+      // another option:
+      lift2(_ && _, that)
 
     /** EXERCISE 2
       *
       * Add an "or" operator that will match an email if either the first or the second email filter
       * match the email.
       */
-    def ||(that: EmailFilter): EmailFilter = ???
+    def ||(that: EmailFilter): EmailFilter =
+//      EmailFilter(email => self.matches(email) || that.matches(email))
+      // another option:
+      lift2(_ || _, that)
 
     /** EXERCISE 3
       *
       * Add a "negate" operator that will match an email if this email filter does NOT match an
       * email.
       */
-    def unary_! : EmailFilter = ???
+    def unary_! : EmailFilter =
+      EmailFilter(email => !self.matches(email))
+
   end EmailFilter
   object EmailFilter:
     def senderIs(address: Address): EmailFilter = EmailFilter(_.sender == address)
@@ -149,7 +175,11 @@ object email_filter:
     * contain the word "N95", and which are NOT addressed to "john@doe.com". Build this filter up
     * compositionally by using the defined constructors and operators.
     */
-  lazy val emailFilter1 = ???
+  lazy val emailFilter1 =
+    EmailFilter.subjectContains("discount") &&
+      EmailFilter.bodyContains("N95") &&
+      !EmailFilter.recipientIs(Address("john@doe.com"))
+
 end email_filter
 
 /** DATA TRANSFORM - EXERCISE SET 3
@@ -461,7 +491,13 @@ object education:
       *
       * Add a `+` operator that combines this quiz result with the specified quiz result.
       */
-    def +(that: QuizResult): QuizResult = ???
+    def +(that: QuizResult): QuizResult =
+      QuizResult(
+        self.correctPoints + that.correctPoints,
+        self.bonusPoints + that.bonusPoints,
+        self.wrongPoints + that.wrongPoints,
+        self.wrong ++ that.wrong
+      )
   object QuizResult:
 
     /** An `empty` QuizResult that, when combined with any quiz result, returns that same quiz
@@ -476,13 +512,17 @@ object education:
       *
       * Add an operator `+` that appends this quiz to the specified quiz.
       */
-    def +(that: Quiz): Quiz = ???
+    def +(that: Quiz): Quiz =
+      Quiz(
+        () => self.run() + that.run()
+      )
 
     /** EXERCISE 3
       *
       * Add a unary operator `bonus` that marks this quiz as a bonus quiz.
       */
-    def bonus: Quiz = ???
+    def bonus: Quiz =
+      Quiz(() => self.run().toBonus)
 
     /** EXERCISE 4
       *
@@ -490,7 +530,12 @@ object education:
       * quiz, and if it returns true, will execute the `ifPass` quiz afterward; but otherwise, will
       * execute the `ifFail` quiz.
       */
-    def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz = ???
+    def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz =
+      Quiz { () =>
+        if f(self.run()) then ifPass.run()
+        else ifFail.run()
+      }
+
   end Quiz
   object Quiz:
     private def grade[A](f: String => A, checker: Checker[A]): QuizResult =
@@ -553,4 +598,18 @@ object education:
     */
   lazy val exampleQuiz: Quiz =
     Quiz(Question.TrueFalse("Is coffee the best hot beverage on planet earth?", Checker.isTrue(10)))
+  lazy val easyQuestion: Quiz = Quiz(Question.TrueFalse("Do we live in 21st century?", Checker.isTrue(12)))
+  lazy val toughBonusQuestion: Quiz =
+    Quiz(Question.Text("What's the capital of Great Britain?", Checker.isText(30)("London"))).bonus
+  lazy val simpleBonusQuestion: Quiz =
+    Quiz(
+      Question.MultipleChoice(
+        "How many grams in kilogram?",
+        Vector("50", "250", "1000"),
+        Checker.isMultipleChoice(15)(3)
+      )
+    )
+  lazy val entireQuiz: Quiz = 
+    exampleQuiz + 
+      toughBonusQuestion.check(question => question.wrong.nonEmpty)(ifPass = simpleBonusQuestion, ifFail = easyQuestion)
 end education
