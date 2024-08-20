@@ -493,7 +493,7 @@ object education:
     def check(f: QuizResult => Boolean)(ifPass: Quiz, ifFail: Quiz): Quiz = ???
   end Quiz
   object Quiz:
-    private def grade[A](f: String => A, checker: Checker[A]): QuizResult =
+    def grade[A](f: String => A, checker: Checker[A]): QuizResult =
       scala.util.Try {
         val submittedAnswer = f(scala.io.StdIn.readLine())
 
