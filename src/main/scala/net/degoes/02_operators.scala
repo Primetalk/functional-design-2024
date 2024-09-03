@@ -44,15 +44,11 @@ package net.degoes
  * solutions.
  */
 
-/** FILE I/O - EXERCISE SET 1
-  *
-  * Consider an ETL application that loads a lot of data from files and FTP servers using Java's
-  * InputStream.
-  */
-object input_stream:
-  import java.io.InputStream
+import java.io.{BufferedInputStream, SequenceInputStream}
+import scala.util.{Failure, Success, Try}
 
-  final case class IStream(createInputStream: () => InputStream):
+object input_stream:
+  final case class IStream(createInputStream: () => InputStream) extends AnyVal:
     self =>
 
     /** EXERCISE 1
@@ -61,45 +57,60 @@ object input_stream:
       * first input stream, and then when that one is exhausted, it will close the first input
       * stream, make the second input stream, and continue reading from the second one.
       */
-    def ++(that: => IStream): IStream = ???
+    def ++(that: => IStream): IStream =
+        val bothStreamsConcatenated = new SequenceInputStream(self.createInputStream(), that.createInputStream())
+        IStream(() => bothStreamsConcatenated)
 
     /** EXERCISE 2
       *
       * Create an operator `orElse` that returns a new `IStream`, which will try to create the first
-      * input stream, but if that fails by throwing an exception, it will then try to create the
-      * second input stream.
+      * input stream, but if that fails by throwing an exception, it will then try to create the second
+      * input stream.
       */
-    def orElse(that: => IStream): IStream = ???
+    def orElse(that: => IStream): IStream =
+      IStream(() =>
+      {
+        try {
+          self.createInputStream()
+        } catch {
+          case _: Exception =>
+            that.createInputStream()
+        }
+      }
+      )
 
     /** EXERCISE 3
       *
       * Create an operator `buffered` that returns a new `IStream`, which will create the input
       * stream, but wrap it in Java's `BufferedInputStream` before returning it.
       */
-    def buffered: IStream = ???
-  end IStream
-  object IStream:
+    def buffered: IStream =
+      IStream(() => new BufferedInputStream(self.createInputStream()))
 
-    /** Creates an empty stream.
-      */
-    val empty: IStream = IStream(() => new java.io.ByteArrayInputStream(Array.ofDim[Byte](0)))
+object IStream:
 
-    /** Defers the construction of a `IStream` that might fail.
-      */
-    def suspend(is: => IStream): IStream =
-      IStream(() => is.createInputStream())
+  /** Creates an empty stream. */
+  val empty: IStream = IStream(() => new java.io.ByteArrayInputStream(Array.ofDim[Byte](0)))
 
-  /** EXERCISE 4
-    *
-    * Construct an IStream that will read the data from `primary`, but if that fails, it will
-    * assemble the data from all the `fragments` by concatenating them into one. Regardless of where
-    * the data comes from, everything should be buffered.
-    */
-  lazy val allData: IStream = ???
+  /** Defers the construction of a `IStream` that might fail. */
+  def suspend(is: => IStream): IStream =
+    IStream(() => is.createInputStream())
 
-  lazy val primary: IStream         = ???
+  /** Create the allData stream as required in Exercise 4 */
+  lazy val allData: IStream =
+    primary.buffered.orElse(
+      fragments.map(_.buffered).reduce(_ ++ _)
+    )
+
+  lazy val primary: IStream = ???
   lazy val fragments: List[IStream] = ???
-end input_stream
+
+//  lazy val primary: IStream = IStream(() => new java.io.FileInputStream("path/to/your/primary/file"))
+//  lazy val fragments: List[IStream] = List(
+//    IStream(() => new java.io.FileInputStream("path/to/your/fragment1/file")),
+//    IStream(() => new java.io.FileInputStream("path/to/your/fragment2/file"))
+//  )
+end IStream
 
 /** EMAIL CLIENT - EXERCISE SET 2
   *
@@ -118,21 +129,24 @@ object email_filter:
       * Add an "and" operator that will match an email if both the first and the second email filter
       * match the email.
       */
-    def &&(that: EmailFilter): EmailFilter = ???
+    def &&(that: EmailFilter): EmailFilter =
+      EmailFilter(email => self.matches(email) && that.matches(email))
 
     /** EXERCISE 2
       *
       * Add an "or" operator that will match an email if either the first or the second email filter
       * match the email.
       */
-    def ||(that: EmailFilter): EmailFilter = ???
+    def ||(that: EmailFilter): EmailFilter =
+      EmailFilter(email => self.matches(email) || that.matches(email))
 
     /** EXERCISE 3
       *
       * Add a "negate" operator that will match an email if this email filter does NOT match an
       * email.
       */
-    def unary_! : EmailFilter = ???
+    def unary_! : EmailFilter =
+      EmailFilter(email => !self.matches(email))
   end EmailFilter
   object EmailFilter:
     def senderIs(address: Address): EmailFilter = EmailFilter(_.sender == address)
@@ -149,7 +163,13 @@ object email_filter:
     * contain the word "N95", and which are NOT addressed to "john@doe.com". Build this filter up
     * compositionally by using the defined constructors and operators.
     */
-  lazy val emailFilter1 = ???
+
+  import EmailFilter._
+
+  lazy val emailFilter1: EmailFilter =
+    subjectContains("discount") &&
+      bodyContains("N95") &&
+      !recipientIs(Address("john@doe.com"))
 end email_filter
 
 /** DATA TRANSFORM - EXERCISE SET 3
@@ -386,7 +406,11 @@ object ui_events:
       * Add a method `+` that composes two listeners into a single listener, by sending each game
       * event to both listeners.
       */
-    def +(that: Listener): Listener = ???
+    def +(that: Listener): Listener =
+      Listener { event =>
+        self.onEvent(event)
+        that.onEvent(event)
+      }
 
     /** EXERCISE 2
       *
@@ -394,21 +418,36 @@ object ui_events:
       * game event to either the left listener, if it does not throw an exception, or the right
       * listener, if the left throws an exception.
       */
-    def orElse(that: Listener): Listener = ???
+    def orElse(that: Listener): Listener =
+      Listener { event =>
+        try
+          self.onEvent(event)
+        catch
+          case _: Throwable => that.onEvent(event)
+      }
 
     /** EXERCISE 3
       *
       * Add a `runOn` operator that returns a Listener that will call this one's `onEvent` callback
       * on the specified `ExecutionContext`.
       */
-    def runOn(ec: scala.concurrent.ExecutionContext): Listener = ???
+    def runOn(ec: ExecutionContext): Listener =
+      Listener { event =>
+        ec.execute(new Runnable {
+          def run(): Unit = onEvent(event)
+        })
+      }
 
     /** EXERCISE 4
       *
       * Add a `debug` unary operator that will call the `onEvent` callback, but before it does, it
       * will print out the game event to the console.
       */
-    def debug: Listener = ???
+    def debug: Listener =
+      Listener { event =>
+        println(s"Event received: $event")
+        onEvent(event)
+      }
   end Listener
 
   /** EXERCISE 5
@@ -417,13 +456,32 @@ object ui_events:
     * game event, making the gfxUpdateListener run on the `uiExecutionContext`, and debugging the
     * input events.
     */
-  lazy val solution = ???
+  // Implementing listeners
+  lazy val twinkleAnimationListener: Listener = Listener { event =>
+    println(s"Twinkle Animation for event: $event")
+  }
 
-  lazy val twinkleAnimationListener: Listener = ???
-  lazy val motionDetectionListener: Listener  = ???
-  lazy val gfxUpdateListener: Listener        = ???
+  lazy val motionDetectionListener: Listener = Listener { event =>
+    println(s"Motion detected for event: $event")
+  }
 
-  lazy val uiExecutionContext: scala.concurrent.ExecutionContext = ???
+  lazy val gfxUpdateListener: Listener = Listener { event =>
+    println(s"Graphics updated for event: $event")
+  }
+
+  lazy val uiExecutionContext: ExecutionContext = ExecutionContext.global
+
+  lazy val solution: Listener = {
+    val debugListener = Listener { event =>
+      println(s"Debugging event: $event")
+    }
+
+  val gfxListenerOnUI = Listener { event =>
+    Future(gfxUpdateListener.onEvent(event))(uiExecutionContext)
+  }
+
+  debugListener + twinkleAnimationListener + motionDetectionListener + gfxListenerOnUI
+}
 end ui_events
 
 /** EDUCATION - GRADUATION PROJECT
