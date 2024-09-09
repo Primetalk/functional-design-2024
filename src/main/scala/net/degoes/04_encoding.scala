@@ -99,13 +99,17 @@ object contact_processing2:
 
   enum SchemaMapping2:
     case Dummy
+    case Combine(first: SchemaMapping2, second: SchemaMapping2)
+    case OrElse(first: SchemaMapping2, second: SchemaMapping2)
+    case Rename(oldName: String, newName: String)
+    case Delete(columnName: String)
 
     /** EXERCISE 1
       *
       * Add a `+` operator that models combining two schema mappings into one, applying the effects
       * of both in sequential order.
       */
-    def +(that: SchemaMapping2): SchemaMapping2 = ???
+    def +(that: SchemaMapping2): SchemaMapping2 = Combine(this, that)
 
     /** EXERCISE 2
       *
@@ -113,27 +117,38 @@ object contact_processing2:
       * effects of the first one, unless it fails, and in that case, applying the effects of the
       * second one.
       */
-    def orElse(that: SchemaMapping2): SchemaMapping2 = ???
+    def orElse(that: SchemaMapping2): SchemaMapping2 = OrElse(this, that)
   object SchemaMapping2:
 
     /** EXERCISE 3
       *
       * Add a constructor for `SchemaMapping` models renaming the column name.
       */
-    def rename(oldName: String, newName: String): SchemaMapping2 = ???
+    def rename(oldName: String, newName: String): SchemaMapping2 = SchemaMapping2.Rename(oldName, newName)
 
     /** EXERCISE 4
       *
       * Add a constructor for `SchemaMapping` that models deleting the column of the specified name.
       */
-    def delete(name: String): SchemaMapping2 = ???
+    def delete(name: String): SchemaMapping2 = SchemaMapping2.Delete(name)
 
   /** EXERCISE 5
     *
     * Implement an interpreter for the `SchemaMapping` model that translates it into into changes on
     * the contact list.
     */
-  def run(mapping: SchemaMapping2, contacts: ContactsCSV): MappingResult[ContactsCSV] = ???
+  def run(mapping: SchemaMapping2, contacts: ContactsCSV): MappingResult[ContactsCSV] =
+    mapping match
+      case SchemaMapping2.Dummy =>
+        MappingResult.Success(contacts, Nil)
+      case SchemaMapping2.Combine(first, second) =>
+        run(first, contacts).flatMap(updatedContacts => run(second, updatedContacts))
+      case SchemaMapping2.OrElse(first, second) =>
+        run(first, contacts).orElse(run(second, contacts))
+      case SchemaMapping2.Rename(oldName, newName) =>
+        MappingResult.Success(contacts.rename(oldName, newName), Nil)
+      case SchemaMapping2.Delete(columnName) =>
+        MappingResult.Success(contacts.delete(columnName), Nil)
 
   /** BONUS EXERCISE
     *
@@ -141,7 +156,15 @@ object contact_processing2:
     * schema mapping in cases where doing so wouldn't later the result.
     */
   def optimize(schemaMapping: SchemaMapping2): SchemaMapping2 =
-    ???
+    schemaMapping match
+      case SchemaMapping2.Combine(first, second) =>
+        val optimizedFirst = optimize(first)
+        val optimizedSecond = optimize(second)
+        (optimizedFirst, optimizedSecond) match
+          case (SchemaMapping2.Delete(_), _) => optimizedFirst + optimizedSecond
+          case (_, SchemaMapping2.Delete(_)) => optimizedSecond + optimizedFirst
+          case _ => optimizedFirst + optimizedSecond
+      case other => other
 end contact_processing2
 
 /** EMAIL CLIENT - EXERCISE SET 3
@@ -155,6 +178,13 @@ object email_filter2:
 
   enum EmailFilter:
     case Dummy
+    case And(left: EmailFilter, right: EmailFilter)
+    case Or(left: EmailFilter, right: EmailFilter)
+    case Not(filter: EmailFilter)
+    case SubjectContains(phrase: String)
+    case BodyContains(phrase: String)
+    case SenderIn(senders: Set[Address])
+    case RecipientIn(recipients: Set[Address])
 
     def self = this
 
@@ -163,21 +193,24 @@ object email_filter2:
       * Add an "and" operator that models matching an email if both the first and the second email
       * filter match the email.
       */
-    def &&(that: EmailFilter): EmailFilter = ???
+    def &&(that: EmailFilter): EmailFilter = 
+      EmailFilter.And(self, that)
 
     /** EXERCISE 2
       *
       * Add an "or" operator that models matching an email if either the first or the second email
       * filter match the email.
       */
-    def ||(that: EmailFilter): EmailFilter = ???
+    def ||(that: EmailFilter): EmailFilter =
+      EmailFilter.Or(self, that)
 
     /** EXERCISE 3
       *
       * Add a "negate" operator that models matching an email if this email filter does NOT match an
       * email.
       */
-    def negate: EmailFilter = ???
+    def negate: EmailFilter = 
+      EmailFilter.Not(self)
   end EmailFilter
   object EmailFilter:
 
@@ -186,28 +219,32 @@ object email_filter2:
       * Add a constructor for `EmailFilter` that models looking to see if the subject of an email
       * contains the specified word.
       */
-    def subjectContains(string: String): EmailFilter = ???
+    def subjectContains(string: String): EmailFilter = 
+      EmailFilter.SubjectContains(string)
 
     /** EXERCISE 5
       *
       * Add a constructor for `EmailFilter` that models looking to see if the body of an email
       * contains the specified word.
       */
-    def bodyContains(string: String): EmailFilter = ???
+    def bodyContains(string: String): EmailFilter =
+      EmailFilter.BodyContains(string)
 
     /** EXERCISE 6
       *
       * Add a constructor for `EmailFilter` that models looking to see if the sender of an email is
       * in the specified set of senders.
       */
-    def senderIn(senders: Set[Address]): EmailFilter = ???
+    def senderIn(senders: Set[Address]): EmailFilter =
+      EmailFilter.SenderIn(senders)
 
     /** EXERCISE 7
       *
       * Add a constructor for `EmailFilter` that models looking to see if the recipient of an email
       * is in the specified set of recipients.
       */
-    def recipientIn(recipients: Set[Address]): EmailFilter = ???
+    def recipientIn(recipients: Set[Address]): EmailFilter = 
+      EmailFilter.RecipientIn(recipients)
   end EmailFilter
 
   /** EXERCISE 8
@@ -216,13 +253,42 @@ object email_filter2:
     * specified email.
     */
   def matches(filter: EmailFilter, email: Email): Boolean =
-    ???
+    filter match
+      case EmailFilter.And(left, right) =>
+        matches(left, email) && matches(right, email)
+      case EmailFilter.Or(left, right) =>
+        matches(left, email) || matches(right, email)
+      case EmailFilter.Not(innerFilter) =>
+        !matches(innerFilter, email)
+      case EmailFilter.SubjectContains(phrase) =>
+        email.subject.contains(phrase)
+      case EmailFilter.BodyContains(phrase) =>
+        email.body.contains(phrase)
+      case EmailFilter.SenderIn(senders) =>
+        senders.contains(email.sender)
+      case EmailFilter.RecipientIn(recipients) =>
+        email.to.exists(recipients.contains)
 
   /** EXERCISE 9
     *
     * Implement a function to make an English-readable description of an `EmailFilter`.
     */
-  def describe(filter: EmailFilter): Unit = ???
+  def describe(filter: EmailFilter): Unit =
+    filter match
+      case EmailFilter.And(left, right) =>
+        s"(${describe(left)} AND ${describe(right)})"
+      case EmailFilter.Or(left, right) =>
+        s"(${describe(left)} OR ${describe(right)})"
+      case EmailFilter.Not(innerFilter) =>
+        s"(NOT ${describe(innerFilter)})"
+      case EmailFilter.SubjectContains(phrase) =>
+        s"Subject contains '$phrase'"
+      case EmailFilter.BodyContains(phrase) =>
+        s"Body contains '$phrase'"
+      case EmailFilter.SenderIn(senders) =>
+        s"Sender is in ${senders.map(_.emailAddress).mkString(", ")}"
+      case EmailFilter.RecipientIn(recipients) =>
+        s"Recipient is in ${recipients.map(_.emailAddress).mkString(", ")}"
 end email_filter2
 
 /** SPREADSHEET - EXERCISE SET 4

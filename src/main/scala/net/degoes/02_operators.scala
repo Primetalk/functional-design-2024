@@ -1,4 +1,7 @@
 package net.degoes
+import net.degoes.input_stream.IStream.empty
+import java.io.{BufferedInputStream, ByteArrayInputStream, SequenceInputStream}
+import scala.concurrent.ExecutionContext
 
 /*
  * INTRODUCTION
@@ -61,7 +64,10 @@ object input_stream:
       * first input stream, and then when that one is exhausted, it will close the first input
       * stream, make the second input stream, and continue reading from the second one.
       */
-    def ++(that: => IStream): IStream = ???
+    def ++(that: => IStream): IStream = 
+      IStream(
+        () => new SequenceInputStream(self.createInputStream(), that.createInputStream())
+      )
 
     /** EXERCISE 2
       *
@@ -69,14 +75,19 @@ object input_stream:
       * input stream, but if that fails by throwing an exception, it will then try to create the
       * second input stream.
       */
-    def orElse(that: => IStream): IStream = ???
-
+    def orElse(that: => IStream): IStream = IStream(() => {
+      try {
+        self.createInputStream()
+      } catch {
+        case _: Exception => that.createInputStream()
+      }
+    })
     /** EXERCISE 3
       *
       * Create an operator `buffered` that returns a new `IStream`, which will create the input
       * stream, but wrap it in Java's `BufferedInputStream` before returning it.
       */
-    def buffered: IStream = ???
+    def buffered: IStream = IStream(() => new BufferedInputStream(self.createInputStream()))
   end IStream
   object IStream:
 
@@ -95,8 +106,12 @@ object input_stream:
     * assemble the data from all the `fragments` by concatenating them into one. Regardless of where
     * the data comes from, everything should be buffered.
     */
-  lazy val allData: IStream = ???
-
+  lazy val allData: IStream =
+    primary
+      .orElse(
+        fragments.foldLeft(empty)(_ ++ _)
+      )
+      .buffered
   lazy val primary: IStream         = ???
   lazy val fragments: List[IStream] = ???
 end input_stream
@@ -118,21 +133,24 @@ object email_filter:
       * Add an "and" operator that will match an email if both the first and the second email filter
       * match the email.
       */
-    def &&(that: EmailFilter): EmailFilter = ???
+    def &&(that: EmailFilter): EmailFilter =
+      EmailFilter(email => self.matches(email) && that.matches(email))
 
     /** EXERCISE 2
       *
       * Add an "or" operator that will match an email if either the first or the second email filter
       * match the email.
       */
-    def ||(that: EmailFilter): EmailFilter = ???
+    def ||(that: EmailFilter): EmailFilter = 
+      EmailFilter(email => self.matches(email) || that.matches(email))
 
     /** EXERCISE 3
       *
       * Add a "negate" operator that will match an email if this email filter does NOT match an
       * email.
       */
-    def unary_! : EmailFilter = ???
+    def unary_! : EmailFilter = 
+      EmailFilter(email => !self.matches(email))
   end EmailFilter
   object EmailFilter:
     def senderIs(address: Address): EmailFilter = EmailFilter(_.sender == address)
@@ -149,7 +167,10 @@ object email_filter:
     * contain the word "N95", and which are NOT addressed to "john@doe.com". Build this filter up
     * compositionally by using the defined constructors and operators.
     */
-  lazy val emailFilter1 = ???
+  lazy val emailFilter1 = 
+    EmailFilter.subjectContains("discount") 
+      && EmailFilter.bodyContains("N95") 
+      && !EmailFilter.recipientIs(Address(""))
 end email_filter
 
 /** DATA TRANSFORM - EXERCISE SET 3
@@ -386,7 +407,10 @@ object ui_events:
       * Add a method `+` that composes two listeners into a single listener, by sending each game
       * event to both listeners.
       */
-    def +(that: Listener): Listener = ???
+    def +(that: Listener): Listener = Listener { event =>
+      self.onEvent(event)
+      that.onEvent(event)
+    }
 
     /** EXERCISE 2
       *
@@ -394,21 +418,30 @@ object ui_events:
       * game event to either the left listener, if it does not throw an exception, or the right
       * listener, if the left throws an exception.
       */
-    def orElse(that: Listener): Listener = ???
-
+    def orElse(that: Listener): Listener = Listener { event =>
+      try
+        self.onEvent(event)
+      catch
+        case _: Exception => that.onEvent(event)
+    }
     /** EXERCISE 3
       *
       * Add a `runOn` operator that returns a Listener that will call this one's `onEvent` callback
       * on the specified `ExecutionContext`.
       */
-    def runOn(ec: scala.concurrent.ExecutionContext): Listener = ???
+    def runOn(ec: ExecutionContext): Listener = Listener { event =>
+      ec.execute(() => self.onEvent(event))
+    }
 
     /** EXERCISE 4
       *
       * Add a `debug` unary operator that will call the `onEvent` callback, but before it does, it
       * will print out the game event to the console.
       */
-    def debug: Listener = ???
+    def debug: Listener = Listener { event =>
+      println(s"Debug: $event")
+      self.onEvent(event)
+    }
   end Listener
 
   /** EXERCISE 5
@@ -423,7 +456,7 @@ object ui_events:
   lazy val motionDetectionListener: Listener  = ???
   lazy val gfxUpdateListener: Listener        = ???
 
-  lazy val uiExecutionContext: scala.concurrent.ExecutionContext = ???
+  lazy val uiExecutionContext: ExecutionContext = ExecutionContext.fromExecutor(java.util.concurrent.Executors.newFixedThreadPool(4))
 end ui_events
 
 /** EDUCATION - GRADUATION PROJECT

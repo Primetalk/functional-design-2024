@@ -55,7 +55,7 @@ object spreadsheet:
     * Design a data type called `CalculatedValue`, which represents a `Value` that is dynamically
     * computed from a `Spreadsheet`.
     */
-  final case class CalculatedValue( /* ??? */ ):
+  final case class CalculatedValue(eval: Spreadsheet => Value):
     self =>
 
     /** EXERCISE 2
@@ -63,25 +63,43 @@ object spreadsheet:
       * Add an operator that returns a new `CalculatedValue` that is the negated version of this
       * one.
       */
-    def unary_- : CalculatedValue = ???
+    def unary_- : CalculatedValue = CalculatedValue { spreadsheet =>
+      self.eval(spreadsheet) match
+        case Value.Dbl(v) => Value.Dbl(-v)
+        case Value.Error(m) => Value.Error(m)
+        case other => Value.Error("Negation not supported for this type")
+    }
 
     /** EXERCISE 3
       *
       * Add a binary operator `+` that returns a new `CalculatedValue` that is the sum of the two
       * calculated values.
       */
-    def +(that: CalculatedValue): CalculatedValue = ???
-
+    def +(that: CalculatedValue): CalculatedValue = CalculatedValue { spreadsheet =>
+      (self.eval(spreadsheet), that.eval(spreadsheet)) match
+        case (Value.Dbl(v1), Value.Dbl(v2)) => Value.Dbl(v1 + v2)
+        case (Value.Error(m), _) => Value.Error(m)
+        case (_, Value.Error(m)) => Value.Error(m)
+        case _ => Value.Error("not supported for this type")
+    }
     /** EXERCISE 4
       *
       * Add a binary operator `-` that returns a new `CalculatedValue` that is the difference of the
       * two calculated values.
       */
-    def -(that: CalculatedValue): CalculatedValue = ???
-
+    def -(that: CalculatedValue): CalculatedValue = CalculatedValue { spreadsheet =>
+      (self.eval(spreadsheet), that.eval(spreadsheet)) match
+        case (Value.Dbl(v1), Value.Dbl(v2)) => Value.Dbl(v1 - v2)
+        case (Value.Error(m), _) => Value.Error(m)
+        case (_, Value.Error(m)) => Value.Error(m)
+        case _ => Value.Error("not supported for this type")
+    }
     protected def binaryOp(that: CalculatedValue)(error: String)(
       f: PartialFunction[(Value, Value), Value]
-    ): CalculatedValue = ???
+    ): CalculatedValue = CalculatedValue { spreadsheet =>
+      (self.eval(spreadsheet), that.eval(spreadsheet)) match
+        case (v1, v2) => f.applyOrElse((v1, v2), (_: (Value, Value)) => Value.Error(error))
+    }
   end CalculatedValue
   object CalculatedValue:
 
@@ -89,20 +107,26 @@ object spreadsheet:
       *
       * Add a constructor that makes an `CalculatedValue` from a `Value`.
       */
-    def const(contents: Value): CalculatedValue = ???
+    def const(value: Value): CalculatedValue = CalculatedValue(_ => value)
 
     /** EXERCISE 6
       *
       * Add a constructor that provides access to the value of the specified cell, identified by
       * col/row.
       */
-    def at(col: Int, row: Int): CalculatedValue = ???
+    def at(col: Int, row: Int): CalculatedValue = CalculatedValue { spreadsheet =>
+      spreadsheet.valueAt(col, row).eval(spreadsheet)
+    }
 
   /** EXERCISE 7
     *
     * Describe a cell whose contents are the sum of the cells at (0, 0) and (1, 0).
     */
-  lazy val cell1: Cell = ???
+  lazy val cell1: Cell = Cell( //ошибка
+    col = 0,
+    row = 0,
+    contents = CalculatedValue.at(0, 0) + CalculatedValue.at(1, 0)
+  )
 end spreadsheet
 
 /** ETL - EXERCISE SET 2
@@ -287,7 +311,8 @@ end etl
   * acceptable to create the schedules in code (rather than reading them from a database).
   */
 object pricing_fetcher:
-  def fetch(directory: java.io.File, url: java.net.URL, schedule: Schedule): Unit = ???
+  def fetch(directory: java.io.File, url: java.net.URL, schedule: Schedule): Unit =
+    ???
 
   enum DayOfWeek:
     case Sunday
@@ -311,7 +336,7 @@ object pricing_fetcher:
     * `Schedule` is a data type that models a schedule, which has the ability to indicate whether at
     * any given `java.time.Instant`, it is time to fetch the pricing data set.
     */
-  final case class Schedule( /* ??? */ ):
+  final case class Schedule(predicate: Time => Boolean):
     self =>
     /*
      * EXERCISE 2
@@ -320,7 +345,8 @@ object pricing_fetcher:
      * yield the union of those schedules. That is, the fetch will occur
      * only when either of the schedules would have performed a fetch.
      */
-    def union(that: Schedule): Schedule = ???
+    def union(that: Schedule): Schedule =
+      Schedule(t => self.predicate(t) || that.predicate(t))
 
     /** EXERCISE 3
       *
@@ -328,14 +354,16 @@ object pricing_fetcher:
       * intersection of those schedules. That is, the fetch will occur only when both of the
       * schedules would have performed a fetch.
       */
-    def intersection(that: Schedule): Schedule = ???
+    def intersection(that: Schedule): Schedule =
+      Schedule(t => self.predicate(t) && that.predicate(t))
 
     /** EXERCISE 4
       *
       * Create a unary operator that returns a schedule that will never fetch when the original
       * schedule would fetch, and will always fetch when the original schedule would not fetch.
       */
-    def negate: Schedule = ???
+    def negate: Schedule =
+      Schedule(t => !self.predicate(t))
   end Schedule
   object Schedule:
 
@@ -343,31 +371,44 @@ object pricing_fetcher:
       *
       * Create a constructor for Schedule that models fetching on specific weeks of the month.
       */
-    def weeks(weeks: Int*): Schedule = ???
+    def weeks(weeks: Int*): Schedule =
+      Schedule(t => weeks.contains(t.weekOfMonth))
 
     /** EXERCISE 6
       *
       * Create a constructor for Schedule that models fetching on specific days of the week.
       */
-    def daysOfTheWeek(daysOfTheWeek: DayOfWeek*): Schedule = ???
+    def daysOfTheWeek(daysOfTheWeek: DayOfWeek*): Schedule =
+      Schedule(t => daysOfTheWeek.contains(t.dayOfWeek))
 
     /** EXERCISE 7
       *
       * Create a constructor for Schedule that models fetching on specific hours of the day.
       */
-    def hoursOfTheDay(hours: Int*): Schedule = ???
+    def hoursOfTheDay(hours: Int*): Schedule =
+      Schedule(t => hours.contains(t.hourOfDay))
 
     /** EXERCISE 8
       *
       * Create a constructor for Schedule that models fetching on specific minutes of the hour.
       */
-    def minutesOfTheHour(minutes: Int*): Schedule = ???
+    def minutesOfTheHour(minutes: Int*): Schedule =
+      Schedule(t => minutes.contains(t.minuteOfHour))
   end Schedule
 
+  import Schedule.*
   /** EXERCISE 9
     *
     * Create a schedule that repeats every Wednesday, at 6:00 AM and 12:00 PM, and at 5:30, 6:30,
     * and 7:30 every Thursday.
     */
-  lazy val schedule: Schedule = ???
+  lazy val schedule: Schedule =
+    daysOfTheWeek(DayOfWeek.Wednesday)
+      .intersection(hoursOfTheDay(6, 0).intersection(minutesOfTheHour(0)))
+      .union(
+        daysOfTheWeek(DayOfWeek.Thursday)
+          .intersection(
+            hoursOfTheDay(5, 6, 7).intersection(minutesOfTheHour(30))
+          )
+      )
 end pricing_fetcher
