@@ -94,7 +94,7 @@ object executable_typed:
       * Add a constructor that provides access to the value of the specified cell, identified by
       * col/row.
       */
-    def at(col: Int, row: Int): CalculatedValue[Any] = CalculatedValue(_.valueAt(col, row))
+    def at(col: Int, row: Int): CalculatedValue[Any] = CalculatedValue(s => s.valueAt(col, row).eval(s))
 end executable_typed
 
 /** EXECUTABLE - EXERCISE SET 2
@@ -134,10 +134,9 @@ object declarative_typed:
 
   final case class Cell[A](col: Int, row: Int, contents: CalculatedValue[A])
 
-  enum Operation[+A]:
+  enum Operation:
     case Plus
     case Minus
-    case Arbitrary[A](f: PartialFunction[(A, A), A]) extends Operation[A]
 
   /** EXERCISE 1
     *
@@ -148,8 +147,10 @@ object declarative_typed:
     case Integer(value: Int) extends CalculatedValue[Int]
     case Str(value: String)  extends CalculatedValue[String]
     case Negate(other: CalculatedValue[A])
-    case BinOp(op: Operation[A], a: CalculatedValue[A], b: CalculatedValue[A])
+    case BinOp(op: Operation, num: Numeric[A], a: CalculatedValue[A], b: CalculatedValue[A])
+    case Concat(a: CalculatedValue[String], b: CalculatedValue[String]) extends CalculatedValue[String]
     case Error(error: String) extends CalculatedValue[Nothing]
+    case BinOpArbitrary[A](f: PartialFunction[(A, A), A], error: String, a: CalculatedValue[A], b: CalculatedValue[A]) extends Operation[A]
 
     def self = this
 
@@ -168,7 +169,10 @@ object declarative_typed:
       * calculated values.
       */
     def +[A1 >: A](that: CalculatedValue[A1])(using Numeric[A1]): CalculatedValue[A1] =
-      BinOp(Operation.Plus, this, that)
+      BinOp(Operation.Plus, summon[Numeric[A1]], this, that)
+
+    // def ++[A1 >: String](that: CalculatedValue[A1])(using A <:< String) = 
+    //   BinOp(Operation.Plus, this, that)
 
     /** EXERCISE 4
       *
@@ -176,12 +180,12 @@ object declarative_typed:
       * two calculated values.
       */
     def -[A1 >: A](that: CalculatedValue[A1])(using Numeric[A1]): CalculatedValue[A1] =
-      BinOp(Operation.Minus, this, that)        
+      BinOp(Operation.Minus, summon[Numeric[A1]], this, that)        
 
     protected def binaryOp[A1 >: A](that: CalculatedValue[A1])(error: String)(
       f: PartialFunction[(A1, A1), A1]
     ): CalculatedValue[A1] = 
-      BinOp[A1](Operation.Arbitrary(f), this, that)
+      BinOp[A1](Operation.Arbitrary(f, error), summon[Numeric[A1]], this, that)
         
   end CalculatedValue
   object CalculatedValue:
@@ -209,22 +213,19 @@ object declarative_typed:
       case Negate(other) => calculate(other) match
         case i: Int => (-i).asInstanceOf[A]
         case v => throw IllegalArgumentException(s"Cannot negate $v")
+      case BinOpArbitrary[t](f, error, a, b) => 
+        val aa = calculate(a)
+        val bb = calculate(b)
+        f.lift(aa, bb) match 
+          case Some(a) => a
+          case None    => throw RuntimeException(error)
+      case BinOp(op, num, a, b) => 
+        val aa = calculate(a)
+        val bb = calculate(b)
+        op match
+          case Operation.Plus  => num.plus(aaa, bbb)
+          case Operation.Minus => num.minus(aaa, bbb)
 
-      case BinOp(op:Operation.Arbitrary[t], a, b) => 
-        val aa = calculate(a)
-        val bb = calculate(b)
-        op.f(aa.asInstanceOf[t], bb.asInstanceOf[t])
-      case BinOp(op, a, b) => 
-        val aa = calculate(a)
-        val bb = calculate(b)
-        (aa, bb) match
-          case (aaa: Int, bbb: Int) => 
-            (op match
-              case Operation.Plus => aaa + bbb
-              case Operation.Minus => aaa - bbb
-              case op:Operation.Arbitrary[t] => 
-                op.f(aa.asInstanceOf[t], bb.asInstanceOf[t])
-            ).asInstanceOf[A]
 end declarative_typed
 
 /** PARSERS - GRADUATION PROJECT
