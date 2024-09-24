@@ -206,6 +206,10 @@ object parser:
     case OneChar                                                         extends Parser[Char]
     case Map[A, B](parser: Parser[A], f: A => B)                         extends Parser[B]
     case Repeat[A](value: Parser[A], min: Option[Int], max: Option[Int]) extends Parser[List[A]]
+    case Const[A](value: A) extends Parser[A]
+    case Error(value: String) extends Parser[Nothing]
+    case OrElse[A, A1 >: A](p1: Parser[A], p2: Parser[A1]) extends Parser[A1]
+    case FlatMap[A, B](p1: Parser[A], f: A => Parser[B]) extends Parser[B]
 
     def self = this
 
@@ -221,9 +225,11 @@ object parser:
 
     def <~[B](that: Parser[B]): Parser[A] = (self ~ that).map(_._1)
 
-    def ~[B](that: Parser[B]): Parser[(A, B)] = ??? // EXERCISE 3 - Parser.Sequence(self, that)
+    def ~[B](that: Parser[B]): Parser[(A, B)] = self.flatMap(a => that.map(a -> _))
 
-    def |[A1 >: A](that: Parser[A1]): Parser[A1] = ??? // EXERCISE 4 - Parser.OrElse(self, that)
+    def |[A1 >: A](that: Parser[A1]): Parser[A1] = Parser.OrElse(self, that)
+
+    def flatMap[B](f: A => Parser[B]): Parser[B] = Parser.FlatMap(self, f)
 
     def * : Parser[List[A]] = Parser.Repeat(self, None, None)
 
@@ -238,7 +244,7 @@ object parser:
       *
       * NOTE: Be sure to modify the `parse` method below, so that it can handle the new operation.
       */
-    final case class Succeed()
+    def succeed[A](value: A): Parser[A] = Parser.Const(value)
 
     /** EXERCISE 2
       *
@@ -246,7 +252,7 @@ object parser:
       *
       * NOTE: Be sure to modify the `parse` method below, so that it can handle the new operation.
       */
-    final case class Fail()
+    def fail(message: String): Parser[Nothing] = Parser.Error(message)
 
     /** EXERCISE 3
       *
@@ -254,7 +260,10 @@ object parser:
       *
       * NOTE: Be sure to modify the `parse` method below, so that it can handle the new operation.
       */
-    final case class OrElse()
+    def char(char: Char): Parser[Char] =
+      Parser.OneChar.flatMap[Char]:
+        case c if c == char => succeed(c)
+        case c => fail(s"Invalid char $c")
 
     /** EXERCISE 4
       *
@@ -263,13 +272,32 @@ object parser:
       *
       * NOTE: Be sure to modify the `parse` method below, so that it can handle the new operation.
       */
-    final case class Sequence[A, B]()
+    def string(str: String): Parser[String] = str.foldLeft(succeed("")):
+      case (acc, c) => for  {
+        char <- char(c)
+        s <- acc
+      } yield s + char
+
   end Parser
 
   import Parser.*
 
   def parse[A](parser: Parser[A], input: Input): Either[Error, (Input, A)] =
     parser match
+      case Const(v) => Right((input, v))
+
+      case Error(msg) => Left(msg)
+
+      case OrElse(p1, p2) =>
+        parse(p1, input) match
+          case x @ Right(_) => x
+          case Left(_) => parse(p2, input)
+
+      case FlatMap(p1, f) => 
+        parse(p1, input).flatMap:
+          case (newInput, a) =>
+            parse(f(a), newInput)
+            
       case OneChar =>
         input.headOption
           .map((a: Char) => Right(input.drop(1) -> a))
