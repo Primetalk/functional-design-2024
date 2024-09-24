@@ -147,10 +147,10 @@ object declarative_typed:
     case Integer(value: Int) extends CalculatedValue[Int]
     case Str(value: String)  extends CalculatedValue[String]
     case Negate(other: CalculatedValue[A])
-    case BinOp(op: Operation, num: Numeric[A], a: CalculatedValue[A], b: CalculatedValue[A])
+    case BinOp[A](op: Operation, num: Numeric[A], a: CalculatedValue[A], b: CalculatedValue[A]) extends CalculatedValue[A]
     case Concat(a: CalculatedValue[String], b: CalculatedValue[String]) extends CalculatedValue[String]
     case Error(error: String) extends CalculatedValue[Nothing]
-    case BinOpArbitrary[A](f: PartialFunction[(A, A), A], error: String, a: CalculatedValue[A], b: CalculatedValue[A]) extends Operation[A]
+    case BinOpArbitrary[A](f: PartialFunction[(A, A), A], error: String, a: CalculatedValue[A], b: CalculatedValue[A]) extends CalculatedValue[A]
 
     def self = this
 
@@ -185,7 +185,7 @@ object declarative_typed:
     protected def binaryOp[A1 >: A](that: CalculatedValue[A1])(error: String)(
       f: PartialFunction[(A1, A1), A1]
     ): CalculatedValue[A1] = 
-      BinOp[A1](Operation.Arbitrary(f, error), summon[Numeric[A1]], this, that)
+      BinOpArbitrary(f, error, this, that)
         
   end CalculatedValue
   object CalculatedValue:
@@ -213,7 +213,7 @@ object declarative_typed:
       case Negate(other) => calculate(other) match
         case i: Int => (-i).asInstanceOf[A]
         case v => throw IllegalArgumentException(s"Cannot negate $v")
-      case BinOpArbitrary[t](f, error, a, b) => 
+      case BinOpArbitrary(f, error, a, b) => 
         val aa = calculate(a)
         val bb = calculate(b)
         f.lift(aa, bb) match 
@@ -223,9 +223,13 @@ object declarative_typed:
         val aa = calculate(a)
         val bb = calculate(b)
         op match
-          case Operation.Plus  => num.plus(aaa, bbb)
-          case Operation.Minus => num.minus(aaa, bbb)
-
+          case Operation.Plus  => num.plus(aa, bb)
+          case Operation.Minus => num.minus(aa, bb)
+      case CalculatedValue.Concat(a, b) =>
+        val aa = calculate(a)
+        val bb = calculate(b)
+        aa + bb
+        
 end declarative_typed
 
 /** PARSERS - GRADUATION PROJECT
