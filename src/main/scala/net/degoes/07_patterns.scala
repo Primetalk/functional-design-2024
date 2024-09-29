@@ -1,5 +1,6 @@
 package net.degoes
 
+import scala.collection.SeqMap
 import scala.util.matching.Regex
 
 /*
@@ -31,6 +32,10 @@ object untyped:
     ) extends JsonValidation
     case ValidateString(parent: JsonValidation, pattern: Regex)
 
+    case Sequential(first: JsonValidation, second: JsonValidation)
+    case Parallel(first: JsonValidation, second: JsonValidation)
+    case WithFallback(eval: JsonValidation, fallback: JsonValidation)
+
     def self = this
 
     def element(index: Int): JsonValidation = JsonValidation.DescendElement(self, index)
@@ -53,7 +58,8 @@ object untyped:
       * validate that a field called `address` exists, and then would descend into that field value
       * to validate that a field called `street` exists within it.
       */
-    def ++(that: JsonValidation): JsonValidation = ???
+    def ++(that: JsonValidation): JsonValidation =
+      Sequential(self, that)
 
     /** EXERCISE
       *
@@ -61,7 +67,8 @@ object untyped:
       * should be that `a` is validated, and also `b` is validated (starting from the root of the
       * JSON object).
       */
-    def &&(that: JsonValidation): JsonValidation = ???
+    def &&(that: JsonValidation): JsonValidation =
+      Parallel(self, that)
 
     /** EXERCISE
       *
@@ -69,15 +76,17 @@ object untyped:
       * that `a` is validated, but if the validation fails, then `b` is validated (starting from the
       * root of the JSON object).
       */
-    def ||(that: JsonValidation): JsonValidation = ???
+    def ||(that: JsonValidation): JsonValidation =
+      WithFallback(self, fallback = that)
+
   end JsonValidation
   object JsonValidation:
     def start: JsonValidation = Start
 
   enum Json:
-    case Object(fields: Map[String, Json])
+    case Object(fields: SeqMap[String, Json])
     case Array(elements: List[Json])
-    case String(value: String)
+    case SString(value: String)
     case Number(value: BigDecimal)
     case Boolean(value: Boolean)
     case Null
@@ -88,7 +97,53 @@ object untyped:
       *
       * Implement the following executor which validates JSON.
       */
-    def validateWith(json: Json): Either[String, Unit] = ???
+    def validateWith(json: Json): Either[String, Unit] =
+      (validation, json) match
+        case (JsonValidation.Start, anyJson) => Right(())
+
+        case (JsonValidation.DescendField(parent, name), js: Json.Object) =>
+          js.fields.get(name)
+            .map(_ => ())
+            .toRight(s"No descend field $name")
+        case (JsonValidation.DescendField(parent, name), _) =>
+          Left(s"Not an object, it cannot contain field $name")
+
+        case (JsonValidation.DescendElement(parent, idx), js: Json.Object) =>
+          js.fields.toList
+            .take(idx)
+            .headOption
+            .map(_ => ())
+            .toRight(s"No descend index $idx")
+        case (JsonValidation.DescendElement(parent, idx), js: Json.Array) =>
+          js.elements
+            .take(idx)
+            .headOption
+            .map(_ => ())
+            .toRight(s"No descend index $idx")
+        case (JsonValidation.DescendElement(parent, idx), _) =>
+          Left(s"Not an object/array, it cannot extract index $idx")
+
+        case (JsonValidation.DescendElements(parent), js: Json.Object) => Right(())
+        case (JsonValidation.DescendElements(parent), js: Json.Array) => Right(())
+        case (JsonValidation.DescendElements(parent), _) => Left(s"Not an object/array, it cannot contain any elements inside.")
+
+        case (JsonValidation.ValidateNumber(parent, min, max), number: Json.Number) =>
+          val greaterThanMin = min.forall(_ <= number.value)
+          val lowerThanMax = max.forall(_ >= number.value)
+          if (greaterThanMin && lowerThanMax) Right(()) else Left(s"Number is not in given range")
+        case (JsonValidation.ValidateNumber(parent, min, max), _) =>
+          Left(s"Not a number")
+
+        case (JsonValidation.ValidateString(parent, pattern), js: Json.SString) =>
+          if (pattern.matches(js.value)) Right(()) else Left(s"String does not match the pattern, ${pattern.toString()}")
+        case (JsonValidation.ValidateString(parent, pattern), _) => Left("Not a string, it cannot be match against the pattern")
+
+        case (JsonValidation.Sequential(first, second), js) => ???
+
+        case (JsonValidation.Parallel(first, second), js) => ???
+
+        case (JsonValidation.WithFallback(_, _), _) => ???
+
 end untyped
 
 /** TYPED FUNCTIONAL DOMAINS - EXERCISE SET 2
