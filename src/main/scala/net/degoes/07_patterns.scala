@@ -19,6 +19,8 @@ object untyped:
   lazy val nameValidation =
     JsonValidation.start.field("name").string("""\w+(\s+(\w|\s)+)+""".r)
 
+  // ValidateString(DescendField(Start, "name"), "...")
+
   enum JsonValidation:
     case Start
     case DescendField(parent: JsonValidation, name: String)
@@ -30,6 +32,9 @@ object untyped:
       max: Option[BigDecimal]
     ) extends JsonValidation
     case ValidateString(parent: JsonValidation, pattern: Regex)
+    case AndThen(parent: JsonValidation, child: JsonValidation)
+    case Both(left: JsonValidation, right: JsonValidation)
+    case OrElse(validation: JsonValidation, fallback: JsonValidation)
 
     def self = this
 
@@ -53,7 +58,7 @@ object untyped:
       * validate that a field called `address` exists, and then would descend into that field value
       * to validate that a field called `street` exists within it.
       */
-    def ++(that: JsonValidation): JsonValidation = ???
+    def ++(that: JsonValidation): JsonValidation = JsonValidation.AndThen(self, that)
 
     /** EXERCISE
       *
@@ -61,7 +66,7 @@ object untyped:
       * should be that `a` is validated, and also `b` is validated (starting from the root of the
       * JSON object).
       */
-    def &&(that: JsonValidation): JsonValidation = ???
+    def &&(that: JsonValidation): JsonValidation = JsonValidation.Both(self, that)
 
     /** EXERCISE
       *
@@ -69,26 +74,87 @@ object untyped:
       * that `a` is validated, but if the validation fails, then `b` is validated (starting from the
       * root of the JSON object).
       */
-    def ||(that: JsonValidation): JsonValidation = ???
+    def ||(that: JsonValidation): JsonValidation = JsonValidation.OrElse(self, that)
   end JsonValidation
+
   object JsonValidation:
     def start: JsonValidation = Start
 
   enum Json:
     case Object(fields: Map[String, Json])
     case Array(elements: List[Json])
-    case String(value: String)
+    case JsString(value: String)
     case Number(value: BigDecimal)
     case Boolean(value: Boolean)
     case Null
 
   final case class JsonValidator(validation: JsonValidation):
 
+    private def error(msg: String, json: Json): Either[String, Nothing] =
+      Left(s"$msg: $json")
+
+    private def validateJsons(jsons: List[Json])(f: Json => Either[String, List[Json]]): Either[String, List[Json]] =
+      jsons.foldLeft[Either[String, List[Json]]](Right(List.empty[Json])):
+        case (acc @ Left(_), _) => acc
+        case (Right(xs), json) =>
+          f(json) match
+            case Left(s) => Left(s)
+            case Right(ys) => Right(xs ++ ys)
+          
+    private def run(v: JsonValidation, jsons: List[Json]): Either[String, List[Json]] =
+      v match
+        case JsonValidation.Start =>
+          Right(jsons)
+        case JsonValidation.DescendField(parent, name) =>
+          run(parent, jsons).flatMap(js=>
+            validateJsons(js):
+              case j @ Json.Object(fields) =>
+                fields.get(name).fold(error(s"no field $name", j))(x => Right(List(x)))
+              case json => error("not an object", json)
+          )
+        case JsonValidation.DescendElement(parent, index) =>
+          run(parent, jsons).flatMap(js =>
+            validateJsons(js):
+              case Json.Array(elements) if elements.length > index =>
+                Right(List(elements(index)))
+              case xs @ Json.Array(_) => error(s"array is less than $index", xs)
+              case x => error("not an array", x)
+          )
+        case JsonValidation.DescendElements(parent) =>
+          run(parent, jsons).flatMap(js =>
+            validateJsons(js):
+              case Json.Array(elements) => Right(elements)
+              case x => error("not an array", x)
+          )
+        case JsonValidation.ValidateNumber(parent, min, max) =>
+          run(parent, jsons).flatMap(js =>
+            validateJsons(js):
+              case Json.Number(value) if min.forall(_ < value) && max.forall(_ > value) =>
+                Right(List())
+              case x @ Json.Number(value) => error(s"value is out of bounds [$min, $max]", x)
+              case x => error("is not a number", x)
+          )
+        case JsonValidation.ValidateString(parent, pattern) =>
+          run(parent, jsons).flatMap(js =>
+            validateJsons(js):
+              case Json.JsString(value) if pattern.matches(value) =>
+                Right(List())
+              case x @ Json.JsString(value) => error(s"value does not match $pattern", x)
+              case x => error("is not a string", x)
+          )
+        case JsonValidation.AndThen(parent, child) =>
+          run(parent, jsons).flatMap(run(child, _))
+        case JsonValidation.Both(left, right) =>
+          run(left, jsons).flatMap(js => run(right, jsons).map(js ++ _))
+        case JsonValidation.OrElse(validation, fallback) =>
+          run(validation, jsons).orElse(run(fallback, jsons))
+
     /** EXERCISE
       *
       * Implement the following executor which validates JSON.
       */
-    def validateWith(json: Json): Either[String, Unit] = ???
+    def validateWith(json: Json): Either[String, Unit] = run(validation, List(json)).map(_ => ())
+      
 end untyped
 
 /** TYPED FUNCTIONAL DOMAINS - EXERCISE SET 2
