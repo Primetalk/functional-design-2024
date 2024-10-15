@@ -1,6 +1,7 @@
 package net.degoes
 
 import scala.util.matching.Regex
+import scala.concurrent.duration.Duration
 
 /*
  * INTRODUCTION
@@ -44,13 +45,14 @@ object untyped:
       * root of the JSON object).
       */
     def ||(that: JsonValidation): JsonValidation = JsonValidation.Or(this, that)
+  end JsonValidation
   enum JsonNavigation:
     case Start
     case DescendField(parent: JsonNavigation, name: String)
     case DescendElement(parent: JsonNavigation, index: Int)
     case DescendElements(parent: JsonNavigation)
     case Sequential(parent: JsonNavigation, downwards: JsonNavigation)
-    
+
     def self = this
 
     def element(index: Int): JsonNavigation = JsonNavigation.DescendElement(self, index)
@@ -90,62 +92,66 @@ object untyped:
   type ValidationResult = Either[String, Unit]
   val Validated: ValidationResult = Right((): Unit)
   final case class JsonValidator(validation: JsonValidation):
-    
+
     def navigate(jsons: List[Json], jsonNavigation: JsonNavigation): List[Json] =
       jsonNavigation match
-        case JsonNavigation.Start => jsons
-        case JsonNavigation.DescendField(parent, name) =>
+        case JsonNavigation.Start                         => jsons
+        case JsonNavigation.DescendField(parent, name)    =>
           val jsons2 = navigate(jsons, parent)
-          jsons2.flatMap: 
+          jsons2.flatMap:
             case Json.Object(fields) =>
               fields.get(name).toList
-            case _ => Nil
+            case _                   => Nil
         case JsonNavigation.DescendElement(parent, index) =>
           val jsons2 = navigate(jsons, parent)
-          jsons2.flatMap: 
+          jsons2.flatMap:
             case Json.Array(elements) =>
               elements.drop(index - 1).take(1)
-            case _ => Nil
-        case JsonNavigation.DescendElements(parent) =>
+            case _                    => Nil
+        case JsonNavigation.DescendElements(parent)       =>
           val jsons2 = navigate(jsons, parent)
-          jsons2.flatMap: 
+          jsons2.flatMap:
             case Json.Array(elements) =>
               elements
-            case _ => Nil
+            case _                    => Nil
         case JsonNavigation.Sequential(parent, downwards) =>
           val jsons2 = navigate(jsons, parent)
           navigate(jsons2, downwards)
+
     /** EXERCISE
       *
       * Implement the following executor which validates JSON.
       */
-    def validateWith(json: Json): Either[String, Unit] = 
+    def validateWith(json: Json): Either[String, Unit] =
       validation match
         case JsonValidation.ValidateNumber(parent, min, max) =>
           val jsons2 = navigate(List(json), parent)
-          jsons2.find:
-            case Json.Number(value) if min.forall(value >= _) && max.forall(value <= _) => false
-            case _ => true
-          .map(j => Left(s"value $j is not a number within [$min, $max]"))
-          .getOrElse(Validated)
-        case JsonValidation.ValidateString(parent, pattern) =>
+          jsons2
+            .find:
+              case Json.Number(value) if min.forall(value >= _) && max.forall(value <= _) => false
+              case _                                                                      => true
+            .map(j => Left(s"value $j is not a number within [$min, $max]"))
+            .getOrElse(Validated)
+        case JsonValidation.ValidateString(parent, pattern)  =>
           val jsons2 = navigate(List(json), parent)
-          jsons2.find:
-            case Json.String(value) if pattern.matches(value) => false
-            case _ => true
-          .map(j => Left(s"value $j is not a string that matches r'$pattern'"))
-          .getOrElse(Validated)
-        case JsonValidation.And(validations*) =>
+          jsons2
+            .find:
+              case Json.String(value) if pattern.matches(value) => false
+              case _                                            => true
+            .map(j => Left(s"value $j is not a string that matches r'$pattern'"))
+            .getOrElse(Validated)
+        case JsonValidation.And(validations*)                =>
           validations
             .map(JsonValidator(_).validateWith(json))
             .find(_.isLeft)
             .getOrElse(Validated)
-        case JsonValidation.Or(validations*) =>
+        case JsonValidation.Or(validations*)                 =>
           validations
             .map(JsonValidator(_).validateWith(json))
             .find(_.isRight)
             .getOrElse(Left(s"None of the validations matched"))
-      
+  end JsonValidator
+
 end untyped
 
 /** TYPED FUNCTIONAL DOMAINS - EXERCISE SET 2
@@ -156,20 +162,68 @@ object typed:
     case CookedPerfect(value: A)
     case Undercooked(value: A)
 
-  enum Ingredient:
+  sealed trait Matter
+  enum Ingredient extends Matter:
+    case Eggs
+    case Yolk
+    case EggWhite
+    case Sugar
+    case Flour
+    case Cinnamon
+    case Curd
+    case VanillaSugar
+    case Salt
+    case RefinedVegetableOil
+
+  enum IntermediateProduct extends Matter:
+    case Dough
+
+    /** Здесь количества продуктов используются для определения пропорций. */
+    case MixedMass(ingredients: List[MatterAmount])
+
+  case class BakedProduct(name: String) extends Matter
+
+  /** Отходы (скорлупа яиц, пар, ...)
+    */
+  case object Waste extends Matter
+
+  enum Ingredient2:
     case Eggs(number: Int)
     case Sugar(amount: Double)
     case Flour(amount: Double)
     case Cinnamon(amount: Double)
 
+  enum Manipulation:
+    case Bake
+    case Fry
+    case Mix
+    case Whisk
+    case Shake
+    case SeparateWhitesYolk
+
+  case class MatterAmount(ingredient: Ingredient, amountGramm: Double)
+
+  case class SingleWholeManipulation(
+    manipulation: Manipulation,
+    duration: Duration,
+    inputs: List[MatterAmount],
+    outputs: List[MatterAmount]
+  )
+
+  case class OvenSettings(temperatureC: Double, fan: Boolean, grille: Boolean, powerW: Double)
+
+  def eggAmount(number: Int): Double = number * 65.0
+
   enum Recipe[+A]:
-    case Disaster                                      extends Recipe[Nothing]
-    case AddIngredient(ingredient: Ingredient)         extends Recipe[Unit]
+    case Mix(ingredients: List[MatterAmount])
     case Bake(recipe: Recipe[A], temp: Int, time: Int) extends Recipe[Baked[A]]
-    case Both[A, B](a: Recipe[A], b: Recipe[B])        extends Recipe[(A, B)]
-    case OneOf[A, B](a: Recipe[A], b: Recipe[B])       extends Recipe[Either[A, B]]
-    case Map[A, B](a: Recipe[A], f: A => B)            extends Recipe[B]
-    case FlatMap[A, B](a: Recipe[A], f: A => Recipe[B])extends Recipe[B]
+
+    case Disaster                                       extends Recipe[Nothing]
+    case AddIngredient(ingredient: Ingredient)          extends Recipe[Unit]
+    case Both[A, B](a: Recipe[A], b: Recipe[B])         extends Recipe[(A, B)]
+    case OneOf[A, B](a: Recipe[A], b: Recipe[B])        extends Recipe[Either[A, B]]
+    case Map[A, B](a: Recipe[A], f: A => B)             extends Recipe[B]
+    case FlatMap[A, B](a: Recipe[A], f: A => Recipe[B]) extends Recipe[B]
     def self = this
 
     /** Uses all the ingredients in a recipe by baking them to produce a baked result.
@@ -236,21 +290,20 @@ object typed:
           if time * temp < 1000 then (Vector(), Baked.Undercooked(a))
           else if time * temp > 6000 then (Vector(), Baked.Burnt(a))
           else (Vector(), Baked.CookedPerfect(a))
-        case Recipe.Both(a, b) => 
+        case Recipe.Both(a, b)               =>
           val (loa, aa) = loop(ingredients, a)
           val (lob, bb) = loop(ingredients, b)
-          (loa ++ lob, (aa,bb))
-        case Recipe.OneOf(a, b) => 
+          (loa ++ lob, (aa, bb))
+        case Recipe.OneOf(a, b)              =>
           val (loa, aa) = loop(ingredients, a)
           if aa == Baked.Burnt || aa == Baked.Undercooked then
             val (lob, bb) = loop(ingredients, b)
             (lob, Right(bb))
-          else 
-            (loa, Left(aa))
-        case Recipe.Map(a, f) => 
+          else (loa, Left(aa))
+        case Recipe.Map(a, f)                =>
           val (loa, aa) = loop(ingredients, a)
           (loa, f(aa))
-        case Recipe.FlatMap(a, f) => 
+        case Recipe.FlatMap(a, f)            =>
           val (loa, aa) = loop(ingredients, a)
           loop(loa, f(aa))
 
@@ -264,19 +317,61 @@ object typed:
 
   /** EXERCISE 5
     *
-    * Make a recipe that will produced a baked cake or other food of your choice!
+    * Make a recipe that will produced a baked cake or other food of your choice! Сырники \=======
+    *
+    * Чтобы сырники получились мягкими и нежными, но при этом хорошо держали форму, большое значение
+    * имеет качество творога.
+    *
+    * Продукты
+    *
+    * Творог жирностью 9% - 400 г Яйца - 1-2 шт. (в зависимости от размера) Сахар - 60 г (3 ст.
+    * ложки), по вкусу Мука - 70 г (2 ст. ложки с большой горкой) + для панировки Ванильный сахар -
+    * 10 г Соль - 1 щепотка Масло растительное рафинированное - для жарки
+    *
+    * Сырники из творога
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №1
+    *
+    * Соединяем в миске творог (натуральный, не мокрый), яйцо, сахар, ванильный сахар и соль.
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №2
+    *
+    * Всё хорошо перемешиваем. Можно использовать блендер, чтобы творожная масса получилась
+    * однородной.
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №3
+    *
+    * Затем добавляем муку и тщательно перемешиваем творожное тесто.
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №4
+    *
+    * Формируем небольшие шарики из творожного теста, слегка их придавливаем.
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №5
+    *
+    * На разогретую сковороду наливаем растительное масло.
+    *
+    * Обваливаем сырники в муке и выкладываем на сковороду.
+    *
+    * Жарим сырники на небольшом огне до золотистой корочки с двух сторон. Можно накрыть сковороду
+    * крышкой, перевернув сырники на другую сторону.
+    *
+    * Фото приготовления рецепта: Сырники из творога - шаг №6
+    *
+    * Приятного аппетита!
     */
-  lazy val recipe: Recipe[Baked[Cake]] = 
+  lazy val recipe: Recipe[Baked[Cake]] =
     Recipe
-      .addIngredient(Ingredient.Flour(500.0))
+      .addIngredient(Ingredient.Flour)         // (500.0))
       .both(
-        Recipe.addIngredient(Ingredient.Sugar(150.0))
-      ).both(
-        Recipe.addIngredient(Ingredient.Eggs(2))
+        Recipe.addIngredient(Ingredient.Sugar) // (150.0))
+      )
+      .both(
+        Recipe.addIngredient(Ingredient.Eggs)  // (2))
       )
       .map(_ => Cake(Nil))
       .bake(200, 30)
-      
+
 end typed
 
 object stack:
