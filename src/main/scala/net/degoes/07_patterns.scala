@@ -94,27 +94,39 @@ end untyped
 /** TYPED FUNCTIONAL DOMAINS - EXERCISE SET 2
   */
 object typed:
-  enum Baked[+A]:
-    case Burnt(value: A)
-    case CookedPerfect(value: A)
-    case Undercooked(value: A)
+  enum Action[+A]:
+    case End
+    case Boil(value: A)
+    case Fry(value: A)
+    case Bake(value: A)
+
+    case TakeOnly(amount: Double)
 
   enum Ingredient:
-    case Eggs(number: Int)
+    case Eggs(amount: Double)
     case Sugar(amount: Double)
     case Flour(amount: Double)
     case Cinnamon(amount: Double)
 
   enum Recipe[+A]:
+    case End                                           extends Recipe[Nothing]
     case Disaster                                      extends Recipe[Nothing]
     case AddIngredient(ingredient: Ingredient)         extends Recipe[Unit]
-    case Bake(recipe: Recipe[A], temp: Int, time: Int) extends Recipe[Baked[A]]
+    case Bake(recipe: Recipe[A], temp: Int, time: Int) extends Recipe[Action.Bake[A]]
+    case Boil(recipe: Recipe[A], time: Int)            extends Recipe[Action.Boil[A]]
+    case Fry(recipe: Recipe[A], time: Int)             extends Recipe[Action.Fry[A]]
+    case TakeOnly(recipe: Recipe[A])                   extends Recipe[Action.TakeOnly[A]]
+
+    case ParMap[B](recipe1: Recipe[A], recipe2: Recipe[B]) extends Recipe[(A, B)]
+    case OrElse[B](main: Recipe[A], fallback: Recipe[B])   extends Recipe[Either[A, B]]
+    case Map[B](main: Recipe[A], f: A => B)                extends Recipe[B]
+    case FlatMap[B](main: Recipe[A], f: A => Recipe[B])    extends Recipe[B]
 
     def self = this
 
     /** Uses all the ingredients in a recipe by baking them to produce a baked result.
       */
-    def bake(temp: Int, time: Int): Recipe[Baked[A]] = Recipe.Bake(self, temp, time)
+    def bake(temp: Int, time: Int): Recipe[Action[A]] = Recipe.Bake(self, temp, time)
 
     /** EXERCISE 1
       *
@@ -124,7 +136,7 @@ object typed:
       * NOTE: Be sure to update the `bake` method below so that you can make recipes that use your
       * new operation.
       */
-    def both[B](that: Recipe[B]): Recipe[(A, B)] = ???
+    def both[B](that: Recipe[B]): Recipe[(A, B)] = Recipe.ParMap(self, that)
 
     /** EXERCISE 2
       *
@@ -134,7 +146,7 @@ object typed:
       * NOTE: Be sure to update the `bake` method below so that you can make recipes that use your
       * new operation.
       */
-    def either[B](that: Recipe[B]): Recipe[Either[A, B]] = ???
+    def either[B](that: Recipe[B]): Recipe[Either[A, B]] = Recipe.OrElse(self, that)
 
     /** EXERCISE 3
       *
@@ -143,7 +155,7 @@ object typed:
       * NOTE: Be sure to update the `bake` method below so that you can make recipes that use your
       * new operation.
       */
-    def map[B](f: A => B): Recipe[B] = ???
+    def map[B](f: A => B): Recipe[B] = Recipe.Map(self, f)
 
     /** EXERCISE 4
       *
@@ -153,7 +165,7 @@ object typed:
       * NOTE: Be sure to update the `bake` method below so that you can make recipes that use your
       * new operation.
       */
-    def flatMap[B](f: A => Recipe[B]): Recipe[B] = ???
+    def flatMap[B](f: A => Recipe[B]): Recipe[B] = Recipe.FlatMap(self, f)
   end Recipe
   object Recipe:
     def addIngredient(ingredient: Ingredient): Recipe[Unit] = AddIngredient(ingredient)
