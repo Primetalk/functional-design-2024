@@ -2,6 +2,7 @@ package net.degoes
 
 import scala.util.matching.Regex
 import scala.concurrent.duration.Duration
+import javax.sound.midi.Sequence
 
 /*
  * INTRODUCTION
@@ -175,11 +176,15 @@ object typed:
     case Salt
     case RefinedVegetableOil
 
-  enum IntermediateProduct extends Matter:
-    case Dough
+  enum MatterAttribute:
+    case Dry
+    case Wet
+    case Soft
 
-    /** Здесь количества продуктов используются для определения пропорций. */
-    case MixedMass(ingredients: List[MatterAmount])
+  case class SpecificMatter(matter: Matter, attributes: MatterAttribute*) extends Matter
+
+  /** разные названия промежуточных продуктов - тесто, масса, смесь... */
+  case class IntermediateProduct(name: String) extends Matter
 
   case class BakedProduct(name: String) extends Matter
 
@@ -197,24 +202,49 @@ object typed:
     case Bake
     case Fry
     case Mix
+    case PressSlightly
+    case Split(n: Int)
     case Whisk
     case Shake
     case SeparateWhitesYolk
 
-  case class MatterAmount(ingredient: Ingredient, amountGramm: Double)
+  case class MatterAmount(matter: Matter, amountGramm: Double)
 
-  case class SingleWholeManipulation(
-    manipulation: Manipulation,
-    duration: Duration,
-    inputs: List[MatterAmount],
-    outputs: List[MatterAmount]
-  )
+  enum TemperatureSetting:
+    case RoomTemp
+    case Oven(value: Int)
+
+  enum ManipulationDuration:
+    case UntilProperlyMixed
+    case UntilProperlyBaked
+    case FixedDuration(duration: Duration)
 
   case class OvenSettings(temperatureC: Double, fan: Boolean, grille: Boolean, powerW: Double)
 
   def eggAmount(number: Int): Double = number * 65.0
 
-  enum Recipe[+A]:
+  val pinch = 5
+
+  enum Recipe:
+    case SingleWholeManipulation(
+      manipulation: Manipulation,
+      duration: ManipulationDuration,
+      temperature: TemperatureSetting,
+      inputs: List[MatterAmount],
+      outputs: List[MatterAmount]
+    )
+    case SplitOperation(
+      input: MatterAmount,
+      partCount: Int,
+      partOutput: MatterAmount
+    )
+    case Parallel(recipes: List[Recipe])
+    case Sequence(recipes: List[Recipe])
+
+  /** Рецепты сгруппированы по тому продукту, который получается в результате применения рецепта.
+    */
+  type RecipeBook = Map[Matter, Recipe]
+  enum Recipe2[+A]:
     case Mix(ingredients: List[MatterAmount])
     case Bake(recipe: Recipe[A], temp: Int, time: Int) extends Recipe[Baked[A]]
 
@@ -361,7 +391,61 @@ object typed:
     * Приятного аппетита!
     */
   lazy val recipe: Recipe[Baked[Cake]] =
+    val curdMass = IntermediateProduct("творожная масса")
+    val dough    = IntermediateProduct("тесто")
+    val curdBall = IntermediateProduct("творожный шарик")
+    val curdFlat = IntermediateProduct("творожная лепёшка")
     Recipe
+      .Sequence(
+        List(
+          Recipe.SingleWholeManipulation(
+            Manipulation.Mix,
+            ???,
+            ???,
+            List(
+              MatterAmount(SpecificMatter(Ingredient.Curd, MatterAttribute.Dry), 400),
+              MatterAmount(Ingredient.Eggs, eggAmount(1)),
+              MatterAmount(Ingredient.Sugar, 60),
+              MatterAmount(Ingredient.VanillaSugar, 10),
+              MatterAmount(Ingredient.Salt, pinch)
+            ),
+            List(
+              MatterAmount(curdMass, 540)
+            )
+          ),
+          Recipe.SingleWholeManipulation(
+            Manipulation.Mix,
+            ???,
+            ???,
+            List(
+              MatterAmount(curdMass, 540),
+              MatterAmount(Ingredient.Flour, 70)
+            ),
+            List(
+              MatterAmount(dough, 610)
+            )
+          ),
+          Recipe.SplitOperation(
+            MatterAmount(dough, 610),
+            partCount = 12,
+            partOutput = curdBall
+          ),
+          Recipe.SingleWholeManipulation(
+            Manipulation.PressSlightly,
+            ???,
+            ???,
+            inputs = List(curdBall),
+            outputs = List(curdFlat)
+          ),
+          Recipe.SingleWholeManipulation(
+            Manipulation.Bake,
+            ManipulationDuration.UntilProperlyBaked,
+            TemperatureSetting.Oven(200),
+            inputs = List(curdBall),
+            outputs = List(curdFlat)
+          )
+        )
+      )
       .addIngredient(Ingredient.Flour)         // (500.0))
       .both(
         Recipe.addIngredient(Ingredient.Sugar) // (150.0))
@@ -371,6 +455,7 @@ object typed:
       )
       .map(_ => Cake(Nil))
       .bake(200, 30)
+  end recipe
 
 end typed
 
