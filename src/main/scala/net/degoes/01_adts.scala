@@ -1,6 +1,9 @@
 package net.degoes
 
 import java.time.Instant
+import java.time.{ LocalDate => Date }
+import zio.Duration
+import javax.print.Doc
 
 /*
  * INTRODUCTION
@@ -25,7 +28,12 @@ object credit_card:
     *
     * * Number * Name * Expiration date * Security code
     */
-  type CreditCard
+  final case class CreditCard(
+    number: String,
+    name: String,
+    expirationDate: Date,
+    securityCode: String
+  )
 
   /** EXERCISE 2
     *
@@ -33,14 +41,28 @@ object credit_card:
     * a physical product, such as a gallon of milk, or a digital product, such as a book or movie,
     * or access to an event, such as a music concert or film showing.
     */
-  type Product
+  enum Product:
+    case PhysicalProduct(kind: PhysicalProductKind, amount: PhysicalProductAmount)
+    case DigitalProduct(kind: DigitalProductKind)
+    case AccessToAnEvent(eventKind: EventKind)
+
+  enum PhysicalProductKind:
+    case Milk
+  enum PhysicalProductAmount:
+    case Gallon
+  enum DigitalProductKind:
+    case Book, Movie
+  enum EventKind:
+    case MusicConcert, FilmShowing
 
   /** EXERCISE 3
     *
     * Using only enums and case classes, create an immutable data model of a product price, which
     * could be one-time purchase fee, or a recurring fee on some regular interval.
     */
-  type PricingScheme
+  enum PricingScheme:
+    case OneTimePurchaseFee(amount: BigDecimal)
+    case RecurringFee(fee: BigDecimal, interval: Duration)
 end credit_card
 
 /** EVENT PROCESSING - EXERCISE SET 3
@@ -50,45 +72,46 @@ end credit_card
   */
 object events:
 
+  // Events are either UserEvent (produced by a user) or DeviceEvent (produced by a device),
+  enum EventSource:
+    case User(userName: String)
+    case Device(deviceId: Int)
+
   /** EXERCISE
     *
     * Refactor the object-oriented data model in this section to a more functional one, which uses
     * only enums and case classes.
     */
-  abstract class Event(val id: Int):
+  final case class EventId(id: Int, time: Instant)
 
-    def time: Instant
+  sealed trait Event:
+    def eventId: EventId
+    def eventSource: EventSource
 
-  // Events are either UserEvent (produced by a user) or DeviceEvent (produced by a device),
-  // please don't extend both it will break code!!!
-  trait UserEvent extends Event:
-    def userName: String
+  sealed trait DeviceEvent extends Event:
+    def eventSource: EventSource.Device
 
-  // Events are either UserEvent (produced by a user) or DeviceEvent (produced by a device),
-  // please don't extend both it will break code!!!
-  trait DeviceEvent extends Event:
-    def deviceId: Int
+  sealed trait UserEvent extends Event:
+    def eventSource: EventSource.User
 
-  class SensorUpdated(id: Int, val deviceId: Int, val time: Instant, val reading: Option[Double])
-      extends Event(id)
-      with DeviceEvent
+  final case class SensorUpdated(
+    eventId: EventId,
+    eventSource: EventSource.Device,
+    reading: Option[Double]
+  ) extends DeviceEvent
 
-  class DeviceActivated(id: Int, val deviceId: Int, val time: Instant)
-      extends Event(id)
-      with DeviceEvent
+  final case class DeviceActivated(eventId: EventId, eventSource: EventSource.Device)
+      extends DeviceEvent
 
-  class UserPurchase(
-    id: Int,
-    val item: String,
-    val price: Double,
-    val time: Instant,
-    val userName: String
-  ) extends Event(id)
-      with UserEvent
+  final case class UserPurchase(
+    eventId: EventId,
+    eventSource: EventSource.User,
+    item: String,
+    price: Double
+  ) extends UserEvent
 
-  class UserAccountCreated(id: Int, val userName: String, val time: Instant)
-      extends Event(id)
-      with UserEvent
+  final case class UserAccountCreated(eventId: EventId, eventSource: EventSource.User)
+      extends UserEvent
 end events
 
 /** DOCUMENT EDITING - EXERCISE SET 4
@@ -106,7 +129,7 @@ object documents:
     * Using only enums and case classes, create a simplified but somewhat realistic model of a
     * Document.
     */
-  type Document
+  final case class Document(id: DocId, content: DocContent, author: UserId)
 
   /** EXERCISE 2
     *
@@ -114,14 +137,16 @@ object documents:
     * have with respect to a document. For example, some users might have read-only permission on a
     * document.
     */
-  type AccessType
+  enum AccessType:
+    case NoAccess, ReadOnly, ReadWrite
 
   /** EXERCISE 3
     *
     * Using only enums and case classes, create a model of the permissions that a user has on a set
     * of documents they have access to. Do not store the document contents themselves in this model.
     */
-  type DocPermissions
+  final case class DocPermissions(permissions: List[DocPermission])
+  final case class DocPermission(subj: UserId, obj: DocId, access: AccessType)
 end documents
 
 /** BANKING - EXERCISE SET 5
@@ -134,7 +159,11 @@ object bank:
     *
     * Using only enums and case classes, develop a model of a customer at a bank.
     */
-  type Customer
+  final case class CustomerId(identifier: String)
+  final case class Customer(id: CustomerId, name: String)
+
+  enum CurrencyType:
+    case RUR, USD, CNY
 
   /** EXERCISE 2
     *
@@ -142,7 +171,9 @@ object bank:
     * account type allows the user to write checks against a given currency. Another account type
     * allows the user to earn interest at a given rate for the holdings in a given currency.
     */
-  type AccountType
+  enum AccountType:
+    case CheckingAccount(currency: CurrencyType)
+    case Deposit(interestRate: BigDecimal, currency: CurrencyType)
 
   /** EXERCISE 3
     *
@@ -150,7 +181,13 @@ object bank:
     * type of bank account, holdings, customer who owns the bank account, and customers who have
     * access to the bank account.
     */
-  type Account
+  final case class AccountId(identifier: String)
+  final case class Account(
+    number: AccountId,
+    owner: CustomerId,
+    holdings: BigDecimal,
+    accountType: AccountType
+  )
 end bank
 
 /** STOCK PORTFOLIO - GRADUATION PROJECT
@@ -164,45 +201,50 @@ object portfolio:
     * Using only enums and case classes, develop a model of a stock exchange. Ensure there exist
     * values for NASDAQ and NYSE.
     */
-  type Exchange
+  enum Exchange:
+    case NASDAQ, NYSE, MOEX, SPBE, SSE
 
   /** EXERCISE 2
     *
     * Using only enums and case classes, develop a model of a currency type.
     */
-  type CurrencyType
+  enum CurrencyType:
+    case RUR, USD, CNY
 
   /** EXERCISE 3
     *
     * Using only enums and case classes, develop a model of a stock symbol. Ensure there exists a
     * value for Apple's stock (APPL).
     */
-  type StockSymbol
+  enum StockSymbol:
+    case APPL, NVDA, GOOGL, MSFT, TCSG, YDEX, MGNT
 
   /** EXERCISE 4
     *
     * Using only enums and case classes, develop a model of a portfolio held by a user of the web
     * application.
     */
-  type Portfolio
+  final case class Stock(amount: BigDecimal, symbol: StockSymbol)
+  final case class Portfolio(stocks: List[Stock])
 
   /** EXERCISE 5
     *
     * Using only enums and case classes, develop a model of a user of the web application.
     */
-  type User
+  final case class User(identifier: String)
 
   /** EXERCISE 6
     *
     * Using only enums and case classes, develop a model of a trade type. Example trade types might
     * include Buy and Sell.
     */
-  type TradeType
+  enum TradeType:
+    case Buy, Sell
 
   /** EXERCISE 7
     *
     * Using only enums and case classes, develop a model of a trade, which involves a particular
     * trade type of a specific stock symbol at specific prices.
     */
-  type Trade
+  final case class Trade(src: User, dst: User, symbol: StockSymbol, amount: BigDecimal)
 end portfolio
